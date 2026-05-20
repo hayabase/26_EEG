@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-05-20T18:55:39",
+  "script": "offline_max2_parallel_measurement.py",
+  "purpose": "offline_max2_parallel_measurement",
+  "config": {
+    "com_port": "COM9",
+    "baudrate": 115200,
+    "channel_mode": "auto",
+    "pre_fixation_sec": 10.0,
+    "stimulus_sec": 3.0,
+    "stimulus_cycles": null,
+    "post_fixation_sec": 10.0,
+    "refresh_rate_override": null,
+    "fullscreen": true,
+    "monitor_index": 0,
+    "window_width": 1280,
+    "window_height": 720,
+    "fixation_radius": 0.025,
+    "stimulus_radius": 0.22,
+    "show_fixation_during_stimulus": false,
+    "run_dir": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539",
+    "serial_timeout_sec": 0.001,
+    "ready_timeout_sec": 15.0,
+    "make_max2_summary": true,
+    "stimuli": [
+      {
+        "name": "stimulus_center_7_5hz",
+        "frequency_hz": 7.5,
+        "position": [
+          0.0,
+          0.0
+        ],
+        "radius": 0.22,
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "start_on": true
+      }
+    ]
+  },
+  "files": {
+    "metadata_json": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539\\metadata.json",
+    "events_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539\\events.csv",
+    "frames_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539\\frames.csv",
+    "serial_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539\\serial_samples.csv",
+    "max2_summary_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement_data\\max2_parallel_20260520_185539\\max2_summary.csv"
+  },
+  "phase_codes": {
+    "0": "idle",
+    "1": "fixation_before",
+    "2": "stimulus",
+    "3": "fixation_after",
+    "8": "finished"
+  },
+  "serial_formats": [
+    "ch1",
+    "ch1,ch2,ch3"
+  ]
+}

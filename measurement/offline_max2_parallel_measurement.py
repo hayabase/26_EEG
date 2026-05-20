@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import argparse
@@ -15,8 +16,48 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
-DEFAULT_BAUDRATE = 115200
-DEFAULT_COM_PORT = "COM8"
+# ===== 初期値設定 =====
+# ここを書き換えると, コマンドラインで指定しない場合の値を変更可能.
+
+# シリアル通信の初期値. COMポートが None の場合は, 起動時に一覧から番号で選択.
+DEFAULT_COM_PORT: Optional[str] = None  # COMポート名. None の場合は起動時に番号で選択.
+DEFAULT_BAUDRATE = 115200  # シリアル通信速度. MAX2側の設定と合わせる.
+DEFAULT_CHANNEL_MODE = "auto"  # 受信チャンネル数の判定方法. auto は1ch/3chを自動判定.
+DEFAULT_SERIAL_TIMEOUT_SEC = 0.001  # シリアル読み取りの待ち時間. 短いほど細かく確認.
+DEFAULT_SERIAL_WARMUP_SEC = 1.0  # 接続直後のシリアル読み捨て時間. デバイス安定待ち用.
+DEFAULT_READY_TIMEOUT_SEC = 15.0  # シリアル準備完了を待つ最大秒数.
+
+# 実験時間の初期値. stimulus_cycles を指定すると刺激秒数より優先.
+DEFAULT_PRE_FIXATION_SEC = 10.0  # 刺激前に中央注視点だけを表示する秒数.
+DEFAULT_STIMULUS_SEC = 3.0  # 点滅刺激を表示する秒数.
+DEFAULT_STIMULUS_CYCLES: Optional[float] = None  # 点滅回数指定. None の場合は秒数指定を使用.
+DEFAULT_POST_FIXATION_SEC = 10.0  # 刺激後に中央注視点だけを表示する秒数.
+
+# 点滅刺激の初期値. frequency は点滅周波数, radius は画面に対する半径.
+DEFAULT_FREQUENCY_HZ = 10.0  # 点滅刺激の周波数.
+DEFAULT_STIMULUS_START = "on"  # 点滅刺激の開始状態. on は表示から開始.
+DEFAULT_FIXATION_RADIUS = 0.025  # 中央注視点の半径. 画面高さに対する比率.
+DEFAULT_FIXATION_COLOR = (0.45, 0.45, 0.45)  # 中央注視点の色. RGBで灰色.
+DEFAULT_STIMULUS_RADIUS = 0.22  # 点滅刺激の半径. 画面高さに対する比率.
+DEFAULT_STIMULUS_POSITION = (0.0, 0.0)  # 点滅刺激の位置. (0, 0) は画面中央.
+DEFAULT_STIMULUS_COLOR = (1.0, 1.0, 1.0)  # 点滅刺激の色. RGBで白.
+DEFAULT_SHOW_FIXATION_DURING_STIMULUS = False  # 刺激中にも中央注視点を重ねて表示するかどうか.
+
+# 表示ウィンドウの初期値. windowed=False のときはフルスクリーン表示.
+DEFAULT_REFRESH_RATE_OVERRIDE: Optional[float] = None  # リフレッシュレートの手動指定. None はモニター値を使用.
+DEFAULT_WINDOWED = False  # True でウィンドウ表示, False でフルスクリーン表示.
+DEFAULT_MONITOR_INDEX = 0  # 使用するモニター番号. 0 は先頭のモニター.
+DEFAULT_WINDOW_WIDTH = 1280  # ウィンドウ表示時の横幅.
+DEFAULT_WINDOW_HEIGHT = 720  # ウィンドウ表示時の縦幅.
+
+# 出力の初期値. output_dir が None の場合は, このスクリプト横の measurement_data を使用.
+DEFAULT_OUTPUT_DIR: Optional[str] = None  # 出力先フォルダの直接指定. None は既定フォルダを使用.
+DEFAULT_OUTPUT_DIR_NAME = "measurement_data"  # スクリプト横に作る既定の出力フォルダ名.
+DEFAULT_RUN_DIR_PREFIX = "max2_parallel"  # 実行ごとの出力フォルダ名につける接頭辞.
+DEFAULT_SKIP_MAX2_SUMMARY = False  # True で max2_summary.csv の作成を省略.
+
+# 補助コマンドの初期値. True で一覧表示だけを行う.
+DEFAULT_LIST_PORTS = False  # True でCOMポート一覧表示だけを行って終了.
 
 
 class Phase(IntEnum):
@@ -61,10 +102,12 @@ class ExperimentConfig:
     window_width: int
     window_height: int
     fixation_radius: float
+    fixation_color: Tuple[float, float, float]
     stimulus_radius: float
     show_fixation_during_stimulus: bool
     run_dir: str
     serial_timeout_sec: float
+    serial_warmup_sec: float
     ready_timeout_sec: float
     make_max2_summary: bool
     stimuli: Tuple[StimulusSpec, ...]
@@ -130,20 +173,57 @@ def set_realtime_priority(label: str) -> None:
         print(f"{label}: priority change skipped: {exc}")
 
 
-def list_serial_ports() -> None:
+def get_serial_ports() -> List[Any]:
     try:
         import serial.tools.list_ports
     except Exception as exc:
         raise RuntimeError(f"pyserial is required to list ports: {exc}") from exc
 
-    ports = list(serial.tools.list_ports.comports())
+    return list(serial.tools.list_ports.comports())
+
+
+def print_serial_ports(ports: Sequence[Any]) -> None:
     if not ports:
         print("No serial ports found.")
         return
 
     print("Available serial ports:")
-    for port in ports:
-        print(f"  {port.device}  {port.description}")
+    for index, port in enumerate(ports, 1):
+        print(f"  {index}: {port.device}  {port.description}")
+
+
+def list_serial_ports() -> None:
+    print_serial_ports(get_serial_ports())
+
+
+def resolve_com_port(com_arg: Optional[str]) -> str:
+    ports = get_serial_ports()
+
+    if com_arg and not com_arg.isdigit():
+        return com_arg
+
+    print_serial_ports(ports)
+    if not ports:
+        if com_arg:
+            raise ValueError(f"--com {com_arg} was given, but no serial ports were found.")
+        manual_port = input("Enter serial port name (e.g. COM8): ").strip()
+        if not manual_port:
+            raise ValueError("Serial port is required.")
+        return manual_port
+
+    if com_arg and com_arg.isdigit():
+        selected_index = int(com_arg)
+    else:
+        selected_text = input("Select serial port number: ").strip()
+        if not selected_text.isdigit():
+            raise ValueError("Serial port selection must be a number.")
+        selected_index = int(selected_text)
+
+    if selected_index < 1 or selected_index > len(ports):
+        raise ValueError(
+            f"Serial port selection must be between 1 and {len(ports)}."
+        )
+    return str(ports[selected_index - 1].device)
 
 
 def parse_serial_line(raw_line: bytes, channel_mode: str) -> Tuple[List[Optional[float]], int, str]:
@@ -195,6 +275,21 @@ def serial_worker(config: ExperimentConfig, shared: SharedState, files: RunFiles
                 ser.reset_input_buffer()
             except Exception:
                 pass
+
+            if config.serial_warmup_sec > 0.0:
+                print(f"serial warmup: discarding data for {config.serial_warmup_sec:.3f} sec")
+                warmup_end_ns = time.perf_counter_ns() + int(
+                    config.serial_warmup_sec * 1_000_000_000
+                )
+                while time.perf_counter_ns() < warmup_end_ns and not shared.stop_event.is_set():
+                    ser.readline()
+                try:
+                    ser.reset_input_buffer()
+                except Exception:
+                    pass
+                if shared.stop_event.is_set():
+                    shared.serial_ready_event.set()
+                    return
 
             shared.serial_ready_event.set()
             if not shared.start_event.wait(timeout=120.0):
@@ -577,7 +672,7 @@ def run_visual_experiment(config: ExperimentConfig, shared: SharedState, files: 
                         renderer.draw_circle(
                             (0.0, 0.0),
                             config.fixation_radius,
-                            (1.0, 1.0, 1.0),
+                            config.fixation_color,
                             aspect_ratio,
                         )
                     elif phase == Phase.STIMULUS:
@@ -596,7 +691,7 @@ def run_visual_experiment(config: ExperimentConfig, shared: SharedState, files: 
                             renderer.draw_circle(
                                 (0.0, 0.0),
                                 config.fixation_radius,
-                                (1.0, 1.0, 1.0),
+                                config.fixation_color,
                                 aspect_ratio,
                             )
 
@@ -749,9 +844,9 @@ def build_center_stimulus(
         StimulusSpec(
             name=f"stimulus_center_{safe_frequency_name}hz",
             frequency_hz=frequency,
-            position=(0.0, 0.0),
+            position=DEFAULT_STIMULUS_POSITION,
             radius=radius,
-            color=(1.0, 1.0, 1.0),
+            color=DEFAULT_STIMULUS_COLOR,
             start_on=start_on,
         ),
     )
@@ -847,6 +942,27 @@ def run(config: ExperimentConfig, files: RunFiles) -> None:
         create_max2_summary(files.serial_csv, files.max2_summary_csv)
 
 
+def parse_rgb_color(text: str) -> Tuple[float, float, float]:
+    parts = [part.strip() for part in text.split(",")]
+    if any(part == "" for part in parts):
+        raise argparse.ArgumentTypeError("color must be one value or r,g,b")
+
+    try:
+        values = [float(part) for part in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("color values must be numbers") from exc
+
+    if len(values) == 1:
+        values = values * 3
+    elif len(values) != 3:
+        raise argparse.ArgumentTypeError("color must be one value or r,g,b")
+
+    if any(value < 0.0 or value > 1.0 for value in values):
+        raise argparse.ArgumentTypeError("color values must be between 0.0 and 1.0")
+
+    return (values[0], values[1], values[2])
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -854,64 +970,87 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "10 s fixation with VSync frame logs and serial timestamps."
         )
     )
-    parser.add_argument("--com", default=DEFAULT_COM_PORT, help="Serial port, e.g. COM8.")
+    parser.add_argument(
+        "--com",
+        default=DEFAULT_COM_PORT,
+        help="Serial port name or listed number, e.g. COM8 or 1.",
+    )
     parser.add_argument("--baudrate", type=int, default=DEFAULT_BAUDRATE)
     parser.add_argument(
         "--channel-mode",
         choices=("auto", "one", "three"),
-        default="auto",
+        default=DEFAULT_CHANNEL_MODE,
         help="Serial line format. auto accepts either 'ch1' or 'ch1,ch2,ch3'.",
     )
-    parser.add_argument("--pre-sec", type=float, default=10.0)
-    parser.add_argument("--stim-sec", type=float, default=3.0)
+    parser.add_argument("--pre-sec", type=float, default=DEFAULT_PRE_FIXATION_SEC)
+    parser.add_argument("--stim-sec", type=float, default=DEFAULT_STIMULUS_SEC)
     parser.add_argument(
         "--stim-cycles",
         type=float,
-        default=None,
+        default=DEFAULT_STIMULUS_CYCLES,
         help="Stimulus duration by flicker cycles. If set, this overrides --stim-sec.",
     )
-    parser.add_argument("--post-sec", type=float, default=10.0)
+    parser.add_argument("--post-sec", type=float, default=DEFAULT_POST_FIXATION_SEC)
     parser.add_argument(
         "--frequency",
         type=float,
-        default=7.5,
+        default=DEFAULT_FREQUENCY_HZ,
         help="Flicker frequency for the single centered stimulus.",
     )
     parser.add_argument(
         "--stimulus-start",
         choices=("on", "off"),
-        default="on",
+        default=DEFAULT_STIMULUS_START,
         help="Initial state of the flicker stimulus.",
     )
-    parser.add_argument("--refresh-rate", type=float, default=None)
-    parser.add_argument("--windowed", action="store_true")
-    parser.add_argument("--monitor-index", type=int, default=0)
-    parser.add_argument("--window-width", type=int, default=1280)
-    parser.add_argument("--window-height", type=int, default=720)
-    parser.add_argument("--fixation-radius", type=float, default=0.025)
-    parser.add_argument("--stimulus-radius", type=float, default=0.22)
-    parser.add_argument("--show-fixation-during-stimulus", action="store_true")
-    parser.add_argument("--serial-timeout-sec", type=float, default=0.001)
-    parser.add_argument("--ready-timeout-sec", type=float, default=15.0)
-    parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--skip-max2-summary", action="store_true")
-    parser.add_argument("--list-ports", action="store_true")
+    parser.add_argument("--refresh-rate", type=float, default=DEFAULT_REFRESH_RATE_OVERRIDE)
+    parser.add_argument("--windowed", action="store_true", default=DEFAULT_WINDOWED)
+    parser.add_argument("--monitor-index", type=int, default=DEFAULT_MONITOR_INDEX)
+    parser.add_argument("--window-width", type=int, default=DEFAULT_WINDOW_WIDTH)
+    parser.add_argument("--window-height", type=int, default=DEFAULT_WINDOW_HEIGHT)
+    parser.add_argument("--fixation-radius", type=float, default=DEFAULT_FIXATION_RADIUS)
+    parser.add_argument(
+        "--fixation-color",
+        type=parse_rgb_color,
+        default=DEFAULT_FIXATION_COLOR,
+        help="Fixation color as grayscale or r,g,b values from 0.0 to 1.0.",
+    )
+    parser.add_argument("--stimulus-radius", type=float, default=DEFAULT_STIMULUS_RADIUS)
+    parser.add_argument(
+        "--show-fixation-during-stimulus",
+        action="store_true",
+        default=DEFAULT_SHOW_FIXATION_DURING_STIMULUS,
+    )
+    parser.add_argument("--serial-timeout-sec", type=float, default=DEFAULT_SERIAL_TIMEOUT_SEC)
+    parser.add_argument("--serial-warmup-sec", type=float, default=DEFAULT_SERIAL_WARMUP_SEC)
+    parser.add_argument("--ready-timeout-sec", type=float, default=DEFAULT_READY_TIMEOUT_SEC)
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--skip-max2-summary",
+        action="store_true",
+        default=DEFAULT_SKIP_MAX2_SUMMARY,
+    )
+    parser.add_argument("--list-ports", action="store_true", default=DEFAULT_LIST_PORTS)
     return parser.parse_args(argv)
 
 
 def config_from_args(args: argparse.Namespace) -> Tuple[ExperimentConfig, RunFiles]:
     if args.output_dir is None:
-        base_output_dir = Path(__file__).resolve().parent / "measurement_data"
+        base_output_dir = Path(__file__).resolve().parent / DEFAULT_OUTPUT_DIR_NAME
     else:
         base_output_dir = Path(args.output_dir)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = base_output_dir / f"max2_parallel_{timestamp}"
+    run_dir = base_output_dir / f"{DEFAULT_RUN_DIR_PREFIX}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     files = make_run_files(run_dir)
 
     if args.frequency <= 0:
         raise ValueError("--frequency must be greater than 0.")
+    if args.serial_warmup_sec < 0:
+        raise ValueError("--serial-warmup-sec must be 0 or greater.")
+    if args.ready_timeout_sec <= args.serial_warmup_sec:
+        raise ValueError("--ready-timeout-sec must be greater than --serial-warmup-sec.")
 
     stimulus_sec = args.stim_sec
     stimulus_cycles = args.stim_cycles
@@ -939,10 +1078,12 @@ def config_from_args(args: argparse.Namespace) -> Tuple[ExperimentConfig, RunFil
         window_width=args.window_width,
         window_height=args.window_height,
         fixation_radius=args.fixation_radius,
+        fixation_color=args.fixation_color,
         stimulus_radius=args.stimulus_radius,
         show_fixation_during_stimulus=args.show_fixation_during_stimulus,
         run_dir=str(run_dir),
         serial_timeout_sec=args.serial_timeout_sec,
+        serial_warmup_sec=args.serial_warmup_sec,
         ready_timeout_sec=args.ready_timeout_sec,
         make_max2_summary=not args.skip_max2_summary,
         stimuli=stimuli,
@@ -956,13 +1097,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         list_serial_ports()
         return 0
 
+    args.com = resolve_com_port(args.com)
     config, files = config_from_args(args)
     write_metadata(config, files)
 
     print("Run directory:")
     print(f"  {config.run_dir}")
     print("Serial:")
-    print(f"  port={config.com_port}, baudrate={config.baudrate}, channel_mode={config.channel_mode}")
+    print(
+        f"  port={config.com_port}, baudrate={config.baudrate}, "
+        f"channel_mode={config.channel_mode}, warmup={config.serial_warmup_sec} sec"
+    )
     print("Stimulus:")
     for stimulus in config.stimuli:
         print(f"  {stimulus.name}: {stimulus.frequency_hz} Hz at {stimulus.position}")
