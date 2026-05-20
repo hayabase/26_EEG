@@ -1,0 +1,11 @@
+name: eeg-max2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pyserial
+  - psutil
+  - glfw
+  - pyglfw
+  - pyopengl
