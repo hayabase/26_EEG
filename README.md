@@ -1,6 +1,7 @@
 # 26_EEG README
 
-MAX2/EEG計測, オフライン解析, 刺激周波数用IIRフィルタ設計をまとめたプロジェクト.
+MAX2/EEG計測(新型装置, 1~3ch対応), オフライン解析, フィルタ設計をまとめたプロジェクト.
+
 
 ## フォルダ構成
 
@@ -12,6 +13,7 @@ MAX2/EEG計測, オフライン解析, 刺激周波数用IIRフィルタ設計�
 | `analysis/PhaseTiming.py` | 刺激周期ごとに波形を折り重ね, 位相タイミングを確認 |
 | `filter_design/design_peak_filter.py` | 刺激周波数だけを強調するIIRピーク/BPF候補を探索 |
 | `filter_design/check_filter.py` | 作成済みフィルタ係数の周波数特性, 群遅延, 極配置, 時間応答を確認 |
+| `filter_design/filter_README.md` | フィルタ設計, フィルタ確認, Rank表示ON/OFFの詳細 |
 | `hardware/hardware_README.md` | MAX2/EEGボード接続, COMポート, 実験前チェック |
 | `analysis/analysis_README.md` | 解析スクリプトの詳細 |
 | `environment.yml` | conda環境定義 |
@@ -285,4 +287,3 @@ conda activate eeg-max2
 ### 文字化けする
 
 MarkdownとPythonファイルはUTF-8で保存する. PowerShell表示だけが崩れる場合はエディタ側で確認する.
-

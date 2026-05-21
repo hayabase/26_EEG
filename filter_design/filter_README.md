@@ -1,0 +1,441 @@
+# filter_design README
+
+このフォルダは, 刺激周波数を強調するIIRフィルタを設計し, そのフィルタ特性を確認するためのコードを置く場所.
+
+SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. そのために `design_peak_filter.py` で候補フィルタを探索し, `check_filter.py` で周波数特性, 群遅延, 極配置, 時間応答を確認する.
+
+## ファイル
+
+| ファイル | 内容 |
+|---|---|
+| `design_peak_filter.py` | target周波数を強調するIIRピーク/BPF候補を探索する |
+| `check_filter.py` | 作成済み係数の特性を確認する |
+| `filter_README.md` | この説明ファイル |
+
+## 使う前の準備
+
+プロジェクトルートで環境を有効化する.
+
+```powershell
+conda activate eeg-max2
+```
+
+環境を更新する場合:
+
+```powershell
+conda env update -f environment.yml --prune
+```
+
+必要な主なライブラリ:
+
+| ライブラリ | 用途 |
+|---|---|
+| `numpy` | 係数, FFT, 配列計算 |
+| `scipy` | IIRフィルタ設計, 周波数応答, 群遅延 |
+| `matplotlib` | グラフ表示 |
+
+確認:
+
+```powershell
+python -c "import numpy, scipy, matplotlib; print('ok')"
+```
+
+## design_peak_filter.py
+
+### 目的
+
+指定した刺激周波数を通し, それ以外を減衰させるIIRフィルタ候補を探索する.
+
+例:
+
+- 10 Hz刺激なら10 Hz付近を強調.
+- 7.5 Hz刺激なら7.5 Hz付近を強調.
+- 候補はRank順に表示.
+- Rank 1の係数を `PhaseTiming.py` の `DEFAULT_BANDPASS_A/B` に貼って使える.
+
+### 基本実行
+
+10 Hz用フィルタを探索:
+
+```powershell
+python filter_design\design_peak_filter.py 10
+```
+
+7.5 Hz用フィルタを探索:
+
+```powershell
+python filter_design\design_peak_filter.py 7.5
+```
+
+サンプリング周波数も指定:
+
+```powershell
+python filter_design\design_peak_filter.py 10 1000
+```
+
+設計法も指定:
+
+```powershell
+python filter_design\design_peak_filter.py 10 1000 butter
+python filter_design\design_peak_filter.py 10 1000 cheby1
+python filter_design\design_peak_filter.py 10 1000 cheby2
+python filter_design\design_peak_filter.py 10 1000 ellip
+```
+
+引数なしで実行すると対話入力になる.
+
+```powershell
+python filter_design\design_peak_filter.py
+```
+
+### JSON保存
+
+候補と係数を保存:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --output filter_design\filter_10hz.json
+```
+
+グラフを保存:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --save-figure filter_design\filter_10hz.png
+```
+
+グラフ表示なし:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --no-plot
+```
+
+進捗表示なし:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --no-progress
+```
+
+## 探索条件
+
+主な既定値:
+
+| 設定 | 既定値 | 意味 |
+|---|---:|---|
+| `--samplerate` | `1000` | EEGサンプリング周波数[Hz] |
+| `--target-freq` | `10` | 強調したい周波数[Hz] |
+| `--family` | `butter` | IIR設計法 |
+| `--passband-search-width` | `1.5` | target周波数周辺で通過帯域候補を探す幅[Hz] |
+| `--passband-edge-step` | `0.05` | 通過帯域端の探索刻み[Hz] |
+| `--stopband-gap-min` | `0.5` | 通過帯域と阻止帯域の最小間隔[Hz] |
+| `--stopband-gap-max` | `4.0` | 通過帯域と阻止帯域の最大間隔[Hz] |
+| `--stopband-gap-step` | `0.25` | 阻止帯域間隔の探索刻み[Hz] |
+| `--gpass-values` | `1` | 通過域端最大損失[dB] |
+| `--gstop-values` | `20,60,80,100,150,200` | 阻止域端最小減衰[dB] |
+| `--acceptable-gain-db` | `-1` | target周波数で許容する最小ゲイン[dB] |
+| `--max-target-gain-db` | `3` | target周波数で許容する最大ゲイン[dB] |
+| `--max-q` | `150` | Q値の上限 |
+| `--max-target-delay-ms` | `1000` | target周波数で許容する最大群遅延[ms] |
+| `--max-pole-abs` | `0.9998` | 極の絶対値上限 |
+| `--max-direct-form-order` | `10` | a,b直接形の最大次数 |
+| `--top-n` | `10` | 表示する候補数 |
+
+### 条件をゆるめる例
+
+候補が出ない場合:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0
+```
+
+`0` 以下を指定すると制限なしになる項目がある.
+
+### 条件を厳しくする例
+
+target周波数の過剰な増幅を避ける:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-gain-db 1
+```
+
+遅延が大きい候補を避ける:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 300
+```
+
+極が単位円に近すぎる候補を避ける:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-pole-abs 0.999
+```
+
+次数を低く抑える:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-direct-form-order 8
+```
+
+## グラフの見方
+
+`design_peak_filter.py` は候補探索後に, Rank候補を重ねた詳細グラフを表示する.
+
+主なグラフ:
+
+| グラフ | 内容 |
+|---|---|
+| Frequency response | 周波数特性. target周波数でどれだけ通るかを見る |
+| Group delay | 群遅延. target周波数付近の遅れを見る |
+| Pole-zero plot | 極と零点. 極が単位円内にあるかを見る |
+| Time waveform | テスト信号を入れたときの出力波形を見る |
+
+左側の `line` パネル:
+
+- `R1`, `R2`, ... はRank番号.
+- チェックを外すと, そのRankの線が全グラフで非表示.
+- もう一度チェックすると再表示.
+- `target` や `-3 dB` などの補助線は対象外.
+
+## コンソール出力の見方
+
+例:
+
+```text
+Rank 1:
+  family: butter
+  prototype_order: 3
+  direct_form_order: 6
+  fp: 9.9000 Hz - 10.0500 Hz
+  fs: 7.7000 Hz - 12.2500 Hz
+  gpass: 1.00 dB
+  gstop: 80.00 dB
+  gain_at_10Hz: 0.02 dB
+  bandwidth_3db: 0.1563 Hz
+  Q: 64.00
+  target_delay: 568.12 ms
+  max_pole_abs: 0.99970589
+```
+
+| 項目 | 意味 |
+|---|---|
+| `family` | 設計法 |
+| `prototype_order` | scipy設計時のプロトタイプ次数 |
+| `direct_form_order` | a,b係数として実装するときの次数 |
+| `fp` | 通過帯域端 |
+| `fs` | 阻止帯域端 |
+| `gpass` | 通過域端最大損失 |
+| `gstop` | 阻止域端最小減衰 |
+| `gain_at_10Hz` | target周波数でのゲイン |
+| `bandwidth_3db` | -3 dB帯域幅 |
+| `Q` | 鋭さ. 高いほど狭帯域 |
+| `target_delay` | target周波数での群遅延 |
+| `max_pole_abs` | 極の絶対値最大. 1未満なら理論上安定 |
+
+## PhaseTiming.pyへ係数を入れる
+
+`design_peak_filter.py` の最後に以下のような出力が出る.
+
+```python
+DEFAULT_BANDPASS_A = (
+    1,
+    -5.98,
+    ...
+)
+
+DEFAULT_BANDPASS_B = (
+    2.05e-10,
+    0,
+    ...
+)
+```
+
+これを `analysis/PhaseTiming.py` 冒頭の同名定数へ貼る.
+
+一時的にコマンドラインで指定する場合:
+
+```powershell
+python analysis\PhaseTiming.py max2_parallel_20260520_185539 --filter-a "1,-3.97,5.93,-3.94,0.98" --filter-b "0.000039,0,-0.000078,0,0.000039"
+```
+
+## check_filter.py
+
+### 目的
+
+既にある係数がどういうフィルタか確認する.
+
+表示内容:
+
+| グラフ | 内容 |
+|---|---|
+| Frequency response | dB軸と振幅倍率軸で周波数特性を見る |
+| Group delay | 周波数ごとの遅延を見る |
+| Pole-zero plot | 極と零点を見る |
+| Time waveform | 入力テスト信号とフィルタ出力を比較 |
+
+### JSONから確認
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1
+```
+
+Rank 3を見る:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 3
+```
+
+### Pythonファイルから確認
+
+`analysis/PhaseTiming.py` の `DEFAULT_BANDPASS_A/B` を確認:
+
+```powershell
+python filter_design\check_filter.py analysis\PhaseTiming.py
+```
+
+係数名を変えている場合:
+
+```powershell
+python filter_design\check_filter.py --module analysis\PhaseTiming.py --a-name DEFAULT_BANDPASS_A --b-name DEFAULT_BANDPASS_B
+```
+
+### 係数を直接指定
+
+```powershell
+python filter_design\check_filter.py --a "1,-3.97,5.93,-3.94,0.98" --b "0.000039,0,-0.000078,0,0.000039"
+```
+
+### テスト信号を変える
+
+10 Hz, 7 Hz, 20 Hzを混ぜて入力する:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --test-freqs 10,7,20 --test-amps 1,0.5,0.5
+```
+
+グラフ範囲:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --plot-max-freq 60
+```
+
+群遅延の縦軸:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --delay-ylim 0,1000
+```
+
+画像保存:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --save-figure filter_design\check_rank1.png
+```
+
+情報保存:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --save-info filter_design\check_rank1.txt
+```
+
+表示せず保存:
+
+```powershell
+python filter_design\check_filter.py filter_design\filter_10hz.json --rank 1 --save-figure filter_design\check_rank1.png --no-show
+```
+
+## 用語
+
+### dBと振幅倍率
+
+振幅倍率は以下で計算する.
+
+```text
+振幅倍率 = 10^(dB / 20)
+```
+
+例:
+
+| dB | 振幅倍率 |
+|---:|---:|
+| `0 dB` | `1.0倍` |
+| `-3 dB` | `約0.707倍` |
+| `-6 dB` | `約0.5倍` |
+| `+3 dB` | `約1.414倍` |
+| `-20 dB` | `0.1倍` |
+
+### Q値
+
+Qは鋭さの指標.
+
+```text
+Q = target周波数 / -3dB帯域幅
+```
+
+Qが高いほど狭い範囲だけを通す. ただし, 一般に群遅延が増えやすく, 極が単位円に近くなりやすい.
+
+### 群遅延
+
+周波数成分がフィルタを通ったときの遅れ. 位相タイミングを見る解析では重要.
+
+`design_peak_filter.py` では `--max-target-delay-ms` でtarget周波数の遅延が大きい候補を除外できる.
+
+### 極と安定性
+
+IIRフィルタでは極が単位円内にあれば理論上安定.
+
+ただし, 極が1に近いほど鋭いフィルタになりやすい反面, 過渡応答が長くなり, 数値誤差にも弱くなる.
+
+## よくある流れ
+
+10 Hz計測データを位相タイミング解析したい場合:
+
+1. フィルタ候補を探索.
+
+```powershell
+python filter_design\design_peak_filter.py 10 --output filter_design\filter_10hz.json
+```
+
+2. グラフ左側の `R1`, `R2` で候補を見比べる.
+3. 良い候補の係数を `analysis/PhaseTiming.py` の `DEFAULT_BANDPASS_A/B` に貼る.
+4. 必要なら `check_filter.py` で再確認.
+
+```powershell
+python filter_design\check_filter.py analysis\PhaseTiming.py --target-freq 10
+```
+
+5. PhaseTimingを実行.
+
+```powershell
+python analysis\PhaseTiming.py max2_parallel_20260520_185539 --frequency 10 --phases stimulus
+```
+
+## トラブルシュート
+
+### scipyが見つからない
+
+```powershell
+conda env update -f environment.yml --prune
+conda activate eeg-max2
+```
+
+### 候補が出ない
+
+条件が厳しすぎる可能性がある.
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0 --max-target-gain-db 0
+```
+
+### Rankが似て見える
+
+係数がほぼ同じ候補は重複除去しているが, 設定が近い候補は似た形になりやすい. 左側の `R1`, `R2` チェックで重ね表示を整理すると見やすい.
+
+### 群遅延が大きい
+
+狭帯域で鋭いフィルタほど遅延が増えやすい. `--max-target-delay-ms` を下げるか, `--max-q` を下げる.
+
+### 極が1に近い
+
+`--max-pole-abs` を下げる.
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-pole-abs 0.999
+```
+
