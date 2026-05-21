@@ -4,13 +4,27 @@
 
 SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. そのために `design_peak_filter.py` で候補フィルタを探索し, `check_filter.py` で周波数特性, 群遅延, 極配置, 時間応答を確認する.
 
-## ファイル
+## ファイル説明
 
 | ファイル | 内容 |
-|---|---|
-| `design_peak_filter.py` | target周波数を強調するIIRピーク/BPF候補を探索する |
-| `check_filter.py` | 作成済み係数の特性を確認する |
-| `filter_README.md` | この説明ファイル |
+| :--- | :--- |
+| [filter_README.md](filter_README.md) | フィルタ設計コード全体の説明 |
+| [design_peak_filter.py](design_peak_filter.py) | target周波数を強調するIIRピーク/BPF候補を探索 |
+| [check_filter.py](check_filter.py) | 作成済み係数の周波数特性, 群遅延, 極配置を確認 |
+| `_tmp_auto_check.txt` | 自動確認時の一時出力, 必要なければ削除可能 |
+
+## 目次
+
+- [使う前の準備](#使う前の準備)
+- [design_peak_filter.py](#design_peak_filterpy)
+- [探索条件](#探索条件)
+- [グラフの見方](#グラフの見方)
+- [コンソール出力の見方](#コンソール出力の見方)
+- [PhaseTiming.pyへ係数を入れる](#phasetimingpyへ係数を入れる)
+- [check_filter.py](#check_filterpy)
+- [用語](#用語)
+- [よくある流れ](#よくある流れ)
+- [トラブルシュート](#トラブルシュート)
 
 ## 使う前の準備
 
@@ -438,4 +452,3 @@ python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0 
 ```powershell
 python filter_design\design_peak_filter.py 10 --max-pole-abs 0.999
 ```
-
