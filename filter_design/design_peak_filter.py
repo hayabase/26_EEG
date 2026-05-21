@@ -28,38 +28,44 @@ DEFAULT_SAMPLERATE = 1000.0
 # 強調したい刺激周波数, SSVEPの基本周波数.
 DEFAULT_TARGET_FREQ = 10.0
 
-# 通過帯域候補の探索幅, target_freqを中心にこの幅の中で上下端を動かす.
-DEFAULT_PASSBAND_SEARCH_WIDTH = 1.0
+# 通過帯域候補の探索幅, target_freq付近の鋭い候補を探す.
+DEFAULT_PASSBAND_SEARCH_WIDTH = 1.5
 
-# 通過帯域端候補の刻み幅, 小さいほど細かく探すが時間がかかる.
+# 通過帯域端候補の刻み幅, 鋭い候補を逃さない細かさ.
 DEFAULT_PASSBAND_EDGE_STEP = 0.05
 
-# 阻止帯と通過帯の間隔の最小値, Hz.
-DEFAULT_STOPBAND_GAP_MIN = 0.1
+# 阻止帯と通過帯の間隔の最小値, 鋭い遷移域も候補に入れる.
+DEFAULT_STOPBAND_GAP_MIN = 0.5
 
-# 阻止帯と通過帯の間隔の最大値, Hz.
+# 阻止帯と通過帯の間隔の最大値, 広めの候補も比較する.
 DEFAULT_STOPBAND_GAP_MAX = 4.0
 
-# 阻止帯と通過帯の間隔の刻み幅, Hz.
-DEFAULT_STOPBAND_GAP_STEP = 0.1
+# 阻止帯と通過帯の間隔の刻み幅, 鋭さの違いを比較する.
+DEFAULT_STOPBAND_GAP_STEP = 0.25
 
 # 通過域端最大損失[dB], 小さいほど通過帯が平坦.
 DEFAULT_GPASS_VALUES = "1"
 
-# 阻止域端最小減衰[dB], 大きいほど強く止めるが次数が増えやすい.
-DEFAULT_GSTOP_VALUES = "80,120,160,200"
+# 阻止域端最小減衰[dB], 鋭さを重視しつつ過大次数を避ける.
+DEFAULT_GSTOP_VALUES = "20,60,80,100,150,200"
 
-# target_freqで許容する最小ゲイン[dB].
-DEFAULT_ACCEPTABLE_GAIN_DB = -3.0
+# target_freqで許容する最小ゲイン[dB], 刺激周波数を十分に通す.
+DEFAULT_ACCEPTABLE_GAIN_DB = -1.0
 
-# Q値の上限, 高すぎる候補を避ける.
-DEFAULT_MAX_Q = 400.0
+# target周波数で許容する最大ゲイン[dB], +3dBを超える候補を除外.
+DEFAULT_MAX_TARGET_GAIN_DB = 3.0
 
-# 極の絶対値の上限, 1未満なら理論上安定.
-DEFAULT_MAX_POLE_ABS = 0.99999
+# Q値の上限, 鋭さを残しつつ極端な遅延を避ける.
+DEFAULT_MAX_Q = 150.0
+
+# target_freqで許容する最大群遅延[ms], 大きすぎる位相ずれを避ける.
+DEFAULT_MAX_TARGET_DELAY_MS = 1000.0
+
+# 極の絶対値の上限, 鋭いが単位円に近すぎる候補は避ける.
+DEFAULT_MAX_POLE_ABS = 0.9998
 
 # a,b直接形で許容する最大次数, 高すぎるIIRは数値誤差が出やすい.
-DEFAULT_MAX_DIRECT_FORM_ORDER = 12
+DEFAULT_MAX_DIRECT_FORM_ORDER = 10
 
 # 表示, 保存する候補数.
 DEFAULT_TOP_N = 10
@@ -76,8 +82,8 @@ DEFAULT_AUTO_CHECK_FILTER = True
 # 自動チェックするRank. allなら表示候補すべて.
 DEFAULT_CHECK_RANKS = "all"
 
-# 1枚にまとめる詳細表示のRank.
-DEFAULT_DETAIL_RANK = 10
+# 固定グラフに重ねる詳細表示のRank. allなら表示候補すべて.
+DEFAULT_DETAIL_RANKS = "all"
 
 
 SCIPY_INSTALL_MESSAGE = (
@@ -102,6 +108,7 @@ class FilterCandidate:
     q_value: float
     bandwidth_3db: float
     gain_at_target_db: float
+    target_delay_ms: float
     max_pole_abs: float
     frequencies: np.ndarray
     response_db: np.ndarray
@@ -125,6 +132,7 @@ class FilterCandidate:
             "q_value": self.q_value,
             "bandwidth_3db": self.bandwidth_3db,
             "gain_at_target_db": self.gain_at_target_db,
+            "target_delay_ms": self.target_delay_ms,
             "max_pole_abs": self.max_pole_abs,
         }
 
@@ -180,6 +188,19 @@ def response_db(signal, b: np.ndarray, a: np.ndarray, samplerate: float, wor_n: 
     magnitude = np.abs(h)
     magnitude[magnitude == 0] = 1e-20
     return frequencies, 20.0 * np.log10(magnitude)
+
+
+def target_group_delay_ms(signal, b: np.ndarray, a: np.ndarray, samplerate: float, target_freq: float):
+    target_w = 2.0 * np.pi * target_freq / samplerate
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*denominator is extremely small.*",
+            category=UserWarning,
+        )
+        _, delay_samples = signal.group_delay((b, a), w=np.asarray([target_w]))
+    delay_ms = float(delay_samples[0] / samplerate * 1000.0)
+    return delay_ms
 
 
 def db_to_amplitude_ratio(db_values):
@@ -305,6 +326,11 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
                     gain_at_target = float(np.interp(target_freq, frequencies, db_values))
                     if gain_at_target < args.acceptable_gain_db:
                         continue
+                    if (
+                        args.max_target_gain_db is not None
+                        and gain_at_target > args.max_target_gain_db
+                    ):
+                        continue
 
                     bandwidth, q_value = calc_bandwidth_and_q(
                         frequencies, db_values, target_freq, gain_at_target
@@ -312,6 +338,13 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
                     if bandwidth is None or q_value is None:
                         continue
                     if args.max_q is not None and q_value > args.max_q:
+                        continue
+
+                    raw_delay_ms = target_group_delay_ms(signal, b, a, samplerate, target_freq)
+                    if not np.isfinite(raw_delay_ms):
+                        continue
+                    delay_ms = abs(raw_delay_ms)
+                    if args.max_target_delay_ms is not None and delay_ms > args.max_target_delay_ms:
                         continue
 
                     candidates.append(
@@ -328,6 +361,7 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
                             q_value=float(q_value),
                             bandwidth_3db=float(bandwidth),
                             gain_at_target_db=gain_at_target,
+                            target_delay_ms=delay_ms,
                             max_pole_abs=max_pole_abs,
                             frequencies=frequencies,
                             response_db=db_values,
@@ -340,12 +374,30 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
     candidates.sort(
         key=lambda item: (
             item.q_value,
+            -abs(item.target_delay_ms),
             -item.direct_form_order,
             item.gain_at_target_db,
         ),
         reverse=True,
     )
-    return candidates[: args.top_n]
+    return unique_candidates(candidates)[: args.top_n]
+
+
+def candidate_coeff_key(candidate: FilterCandidate) -> tuple[str, ...]:
+    values = np.concatenate([candidate.a, candidate.b])
+    return tuple(f"{float(value):.10e}" for value in values)
+
+
+def unique_candidates(candidates: list[FilterCandidate]) -> list[FilterCandidate]:
+    unique: list[FilterCandidate] = []
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = candidate_coeff_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
 
 
 def format_tuple(values: Iterable[float], indent: str = "    ") -> str:
@@ -373,6 +425,7 @@ def print_candidates(candidates: list[FilterCandidate], target_freq: float):
         print(f"  gain_at_{target_freq:g}Hz: {candidate.gain_at_target_db:.2f} dB")
         print(f"  bandwidth_3db: {candidate.bandwidth_3db:.4f} Hz")
         print(f"  Q: {candidate.q_value:.2f}")
+        print(f"  target_delay: {candidate.target_delay_ms:.2f} ms")
         print(f"  max_pole_abs: {candidate.max_pole_abs:.8f}")
         print()
 
@@ -397,7 +450,9 @@ def save_candidates(path: Path, args: argparse.Namespace, candidates: list[Filte
             "gpass_values": parse_float_list(args.gpass_values),
             "gstop_values": parse_float_list(args.gstop_values),
             "acceptable_gain_db": args.acceptable_gain_db,
+            "max_target_gain_db": args.max_target_gain_db,
             "max_q": args.max_q,
+            "max_target_delay_ms": args.max_target_delay_ms,
             "max_pole_abs": args.max_pole_abs,
             "max_direct_form_order": args.max_direct_form_order,
         },
@@ -415,7 +470,8 @@ def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Na
         label = (
             f"Rank {rank}, Q={candidate.q_value:.1f}, "
             f"order={candidate.direct_form_order}, "
-            f"target={candidate.gain_at_target_db:.1f} dB"
+            f"target={candidate.gain_at_target_db:.1f} dB, "
+            f"delay={candidate.target_delay_ms:.0f} ms"
         )
         ax_response.plot(candidate.frequencies[mask], candidate.response_db[mask], label=label)
 
@@ -474,8 +530,9 @@ def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace)
         print("matplotlib が見つからないためグラフ表示をスキップ.")
         return
 
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 9))
     draw_candidate_overview(candidates, args, axes[0], axes[1])
+    fig.subplots_adjust(left=0.08, right=0.92, bottom=0.08, top=0.94, hspace=0.35)
 
     if args.save_figure:
         save_path = Path(args.save_figure)
@@ -483,7 +540,335 @@ def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace)
         fig.savefig(save_path, dpi=150)
         print(f"Figure saved: {save_path}")
 
-    plt.show()
+    enable_rank_check_panel(fig, fig.axes)
+    plt.show(block=True)
+
+
+def is_non_interactive_matplotlib_backend(backend_name: str) -> bool:
+    backend = backend_name.lower()
+    return backend in {
+        "agg",
+        "pdf",
+        "ps",
+        "svg",
+        "cairo",
+        "template",
+    }
+
+
+def enable_interactive_legends(fig, axes):
+    """凡例クリックで対応する線や点を表示/非表示にする."""
+    pick_map = {}
+    axes_list = np.ravel(np.asarray(axes, dtype=object)).tolist()
+
+    for ax in axes_list:
+        legend = ax.get_legend()
+        if legend is None:
+            continue
+
+        original_handles, _ = ax.get_legend_handles_labels()
+        legend_handles = getattr(legend, "legend_handles", None)
+        if legend_handles is None:
+            legend_handles = getattr(legend, "legendHandles", [])
+        legend_texts = legend.get_texts()
+        item_count = min(len(original_handles), len(legend_handles), len(legend_texts))
+
+        for index in range(item_count):
+            original = original_handles[index]
+            legend_items = [legend_handles[index], legend_texts[index]]
+            try:
+                original.set_picker(8)
+                if hasattr(original, "set_pickradius"):
+                    original.set_pickradius(8)
+                pick_map[original] = (original, legend_items)
+            except Exception:
+                pass
+            for item in legend_items:
+                item.set_picker(8)
+                if hasattr(item, "set_pickradius"):
+                    item.set_pickradius(8)
+                pick_map[item] = (original, legend_items)
+
+    if not pick_map:
+        return
+
+    old_cid = getattr(fig, "_interactive_legend_cid", None)
+    if old_cid is not None:
+        fig.canvas.mpl_disconnect(old_cid)
+
+    def on_pick(event):
+        picked = event.artist
+        if picked not in pick_map:
+            return
+
+        original, legend_items = pick_map[picked]
+        visible = not original.get_visible()
+        original.set_visible(visible)
+        alpha = 1.0 if visible else 0.2
+        for item in legend_items:
+            item.set_alpha(alpha)
+        fig.canvas.draw_idle()
+
+    fig._interactive_legend_map = pick_map
+    fig._interactive_legend_cid = fig.canvas.mpl_connect("pick_event", on_pick)
+
+
+def visibility_control_label(label: str) -> str:
+    text = str(label).strip()
+    parts = text.split()
+    if len(parts) >= 2 and parts[0] == "Rank":
+        rank_text = parts[1].rstrip(",")
+        if rank_text.isdigit():
+            return f"R{rank_text}"
+    return ""
+
+
+def enable_interactive_legends(fig, axes):
+    """Add check buttons above the figure to show or hide plotted lines."""
+    try:
+        from matplotlib.widgets import CheckButtons
+    except Exception:
+        return
+
+    artist_groups = {}
+    legend_groups = {}
+    axes_list = np.ravel(np.asarray(axes, dtype=object)).tolist()
+
+    for ax in axes_list:
+        legend = ax.get_legend()
+        if legend is None:
+            continue
+
+        original_handles, _ = ax.get_legend_handles_labels()
+        legend_handles = getattr(legend, "legend_handles", None)
+        if legend_handles is None:
+            legend_handles = getattr(legend, "legendHandles", [])
+        legend_texts = legend.get_texts()
+        item_count = min(len(original_handles), len(legend_handles), len(legend_texts))
+
+        for index in range(item_count):
+            label = visibility_control_label(legend_texts[index].get_text())
+            if not label or label.startswith("_"):
+                continue
+            original = original_handles[index]
+            legend_items = [legend_handles[index], legend_texts[index]]
+            artist_groups.setdefault(label, []).append(original)
+            legend_groups.setdefault(label, []).extend(legend_items)
+
+    if not artist_groups:
+        return
+
+    labels = list(artist_groups.keys())
+    max_rows = 2
+    column_count = int(math.ceil(len(labels) / max_rows))
+    row_count = min(max_rows, len(labels))
+    panel_height = 0.075 if row_count <= 1 else 0.105
+    plot_top = 1.0 - panel_height - 0.012
+    fig.subplots_adjust(top=plot_top)
+
+    checkbuttons = []
+    column_width = 0.94 / column_count
+    panel_bottom = plot_top + 0.01
+    panel_inner_height = panel_height - 0.015
+
+    def set_group_visible(label, visible):
+        for artist in artist_groups[label]:
+            artist.set_visible(visible)
+        alpha = 1.0 if visible else 0.25
+        for item in legend_groups.get(label, []):
+            item.set_alpha(alpha)
+        fig.canvas.draw_idle()
+
+    for column_index in range(column_count):
+        start = column_index * max_rows
+        column_labels = labels[start : start + max_rows]
+        if not column_labels:
+            continue
+
+        ax_box = fig.add_axes(
+            [
+                0.03 + column_index * column_width,
+                panel_bottom,
+                column_width - 0.006,
+                panel_inner_height,
+            ]
+        )
+        status = [all(artist.get_visible() for artist in artist_groups[label]) for label in column_labels]
+        buttons = CheckButtons(ax_box, column_labels, status)
+        for text in buttons.labels:
+            text.set_fontsize(9)
+
+        def on_clicked(label):
+            new_visible = not all(artist.get_visible() for artist in artist_groups[label])
+            set_group_visible(label, new_visible)
+
+        buttons.on_clicked(on_clicked)
+        checkbuttons.append(buttons)
+
+    fig._visibility_checkbox_groups = artist_groups
+    fig._visibility_checkbuttons = checkbuttons
+
+
+def enable_interactive_legends(fig, axes):
+    """Toggle same-rank plotted lines by clicking legend labels."""
+    legend_pick_map = {}
+    rank_groups = {}
+    legend_groups = {}
+    axes_list = np.ravel(np.asarray(axes, dtype=object)).tolist()
+
+    for ax in axes_list:
+        legend = ax.get_legend()
+        if legend is None:
+            continue
+
+        original_handles, _ = ax.get_legend_handles_labels()
+        legend_handles = getattr(legend, "legend_handles", None)
+        if legend_handles is None:
+            legend_handles = getattr(legend, "legendHandles", [])
+        legend_texts = legend.get_texts()
+        item_count = min(len(original_handles), len(legend_handles), len(legend_texts))
+
+        for index in range(item_count):
+            rank_label = visibility_control_label(legend_texts[index].get_text())
+            if not rank_label:
+                continue
+
+            original = original_handles[index]
+            legend_items = [legend_handles[index], legend_texts[index]]
+            rank_groups.setdefault(rank_label, []).append(original)
+            legend_groups.setdefault(rank_label, []).extend(legend_items)
+
+            legend_pick_map[legend_texts[index]] = rank_label
+
+    if not rank_groups:
+        return
+
+    old_pick_cid = getattr(fig, "_visibility_legend_pick_cid", None)
+    if old_pick_cid is not None:
+        fig.canvas.mpl_disconnect(old_pick_cid)
+    old_click_cid = getattr(fig, "_visibility_legend_click_cid", None)
+    if old_click_cid is not None:
+        fig.canvas.mpl_disconnect(old_click_cid)
+
+    def set_rank_visible(rank_label, visible):
+        for artist in rank_groups[rank_label]:
+            artist.set_visible(visible)
+        alpha = 1.0 if visible else 0.25
+        for item in legend_groups.get(rank_label, []):
+            item.set_alpha(alpha)
+        fig.canvas.draw_idle()
+
+    def toggle_rank(rank_label):
+        new_visible = not all(artist.get_visible() for artist in rank_groups[rank_label])
+        set_rank_visible(rank_label, new_visible)
+
+    def on_button_press(event):
+        if event.button != 1:
+            return
+        try:
+            renderer = fig.canvas.get_renderer()
+        except Exception:
+            return
+        for item, rank_label in legend_pick_map.items():
+            try:
+                if item.get_window_extent(renderer).contains(event.x, event.y):
+                    toggle_rank(rank_label)
+                    return
+            except Exception:
+                continue
+
+    fig._visibility_legend_groups = rank_groups
+    fig._visibility_legend_items = legend_groups
+    fig._visibility_legend_pick_map = legend_pick_map
+    fig._visibility_legend_pick_cid = None
+    fig._visibility_legend_click_cid = fig.canvas.mpl_connect("button_press_event", on_button_press)
+
+
+def rank_label_sort_key(label: str):
+    if label.startswith("R") and label[1:].isdigit():
+        return (0, int(label[1:]))
+    return (1, label)
+
+
+def enable_rank_check_panel(fig, axes):
+    """Add a left-side checkbox panel to show or hide each Rank."""
+    try:
+        from matplotlib.widgets import CheckButtons
+    except Exception:
+        return
+
+    rank_groups = {}
+    legend_groups = {}
+    axes_list = np.ravel(np.asarray(axes, dtype=object)).tolist()
+
+    for ax in axes_list:
+        legend = ax.get_legend()
+        if legend is None:
+            continue
+
+        original_handles, _ = ax.get_legend_handles_labels()
+        legend_handles = getattr(legend, "legend_handles", None)
+        if legend_handles is None:
+            legend_handles = getattr(legend, "legendHandles", [])
+        legend_texts = legend.get_texts()
+        item_count = min(len(original_handles), len(legend_handles), len(legend_texts))
+
+        for index in range(item_count):
+            rank_label = visibility_control_label(legend_texts[index].get_text())
+            if not rank_label:
+                continue
+            rank_groups.setdefault(rank_label, []).append(original_handles[index])
+            legend_groups.setdefault(rank_label, []).extend([legend_handles[index], legend_texts[index]])
+
+    if not rank_groups:
+        return
+
+    labels = sorted(rank_groups.keys(), key=rank_label_sort_key)
+    max_rows = 16
+    column_count = int(math.ceil(len(labels) / max_rows))
+    panel_width = min(0.20, 0.075 * column_count + 0.025)
+    fig.subplots_adjust(left=panel_width + 0.04, right=0.97, top=0.92, bottom=0.08)
+
+    checkbuttons = []
+    column_width = (panel_width - 0.02) / column_count
+
+    def set_rank_visible(rank_label, visible):
+        for artist in rank_groups[rank_label]:
+            artist.set_visible(visible)
+        alpha = 1.0 if visible else 0.25
+        for item in legend_groups.get(rank_label, []):
+            item.set_alpha(alpha)
+        fig.canvas.draw_idle()
+
+    for column_index in range(column_count):
+        start = column_index * max_rows
+        column_labels = labels[start : start + max_rows]
+        if not column_labels:
+            continue
+
+        ax_box = fig.add_axes(
+            [
+                0.015 + column_index * column_width,
+                0.10,
+                column_width - 0.006,
+                0.80,
+            ]
+        )
+        ax_box.set_title("line", fontsize=9)
+        status = [all(artist.get_visible() for artist in rank_groups[label]) for label in column_labels]
+        buttons = CheckButtons(ax_box, column_labels, status)
+        for text in buttons.labels:
+            text.set_fontsize(9)
+
+        def on_clicked(label):
+            new_visible = not all(artist.get_visible() for artist in rank_groups[label])
+            set_rank_visible(label, new_visible)
+
+        buttons.on_clicked(on_clicked)
+        checkbuttons.append(buttons)
+
+    fig._rank_check_groups = rank_groups
+    fig._rank_check_buttons = checkbuttons
 
 
 def ask_text(label: str, default):
@@ -580,6 +965,11 @@ def apply_interactive_inputs(args: argparse.Namespace):
         args.gstop_values = ask_text("阻止域端最小減衰[dB], カンマ区切り", args.gstop_values)
         args.acceptable_gain_db = ask_float("target周波数の許容最小ゲイン[dB]", args.acceptable_gain_db)
         args.max_q = ask_float("Q値上限, 0で制限なし", args.max_q, allow_none=True)
+        args.max_target_delay_ms = ask_float(
+            "target周波数の群遅延上限[ms], 0で制限なし",
+            args.max_target_delay_ms,
+            allow_none=True,
+        )
         args.max_pole_abs = ask_float("極の絶対値上限", args.max_pole_abs)
         args.max_direct_form_order = ask_int(
             "a,b直接形の最大次数, 0で制限なし",
@@ -598,6 +988,7 @@ def apply_interactive_inputs(args: argparse.Namespace):
     args.no_check_filter = not ask_bool("候補をcheck_filter.pyで自動確認する", not args.no_check_filter)
     if not args.no_check_filter:
         args.check_ranks = ask_text("自動確認するRank. all, 1, 1-10, 1,3,5 など", args.check_ranks)
+        args.detail_ranks = ask_text("1枚まとめ表示に出す詳細Rank. all, 1, 1-10, 1,3,5 など", args.detail_ranks)
 
 
 def apply_positional_args(args: argparse.Namespace):
@@ -680,20 +1071,16 @@ def build_check_args(args: argparse.Namespace, save_figure: str | None = None, s
     return check_args
 
 
-def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argparse.Namespace, axes):
+def draw_filter_details_overlay(
+    candidates: list[FilterCandidate],
+    detail_ranks: list[int],
+    args: argparse.Namespace,
+    axes,
+):
     import check_filter
     from scipy import signal
 
     check_args = build_check_args(args)
-    b = candidate.b
-    a = candidate.a
-    frequencies, response_db, _ = check_filter.compute_frequency_response(
-        b, a, check_args.samplerate, check_args.wor_n
-    )
-    delay_freq, delay_samples, delay_ms = check_filter.compute_group_delay(
-        b, a, check_args.samplerate, check_args.wor_n
-    )
-    zeros, poles, max_pole_abs, is_stable = check_filter.compute_poles_zeros(b, a)
     test_freqs = check_filter.parse_float_list(check_args.test_freqs) if check_args.test_freqs else [check_args.target_freq]
     test_amps = check_filter.parse_float_list(check_args.test_amps) if check_args.test_amps else [1.0] * len(test_freqs)
     if len(test_amps) != len(test_freqs):
@@ -701,19 +1088,83 @@ def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argpa
 
     duration_sec = check_args.duration_ms / 1000.0
     time_sec, x = check_filter.build_test_signal(check_args.samplerate, duration_sec, test_freqs, test_amps)
-    y = signal.lfilter(b, a, x)
     plot_start_sec = check_args.settle_ms / 1000.0
     plot_end_sec = min(duration_sec, plot_start_sec + check_args.plot_window_ms / 1000.0)
     mask_time = (time_sec >= plot_start_sec) & (time_sec <= plot_end_sec)
-    mask_freq = frequencies <= check_args.plot_max_freq
-    mask_delay = (delay_freq <= check_args.plot_max_freq) & np.isfinite(delay_ms) & np.isfinite(delay_samples)
 
     ax_response, ax_delay, ax_zplane, ax_time = axes
-    ax_response.plot(frequencies[mask_freq], response_db[mask_freq], label=f"Rank {rank} gain")
+
+    color_cycle = [f"C{index}" for index in range(max(10, len(detail_ranks)))]
+
+    summaries: list[str] = []
+    z_limit = 1.1
+
+    for color_index, rank in enumerate(detail_ranks):
+        candidate = candidates[rank - 1]
+        b = candidate.b
+        a = candidate.a
+        color = color_cycle[color_index % len(color_cycle)]
+        frequencies, response_db, _ = check_filter.compute_frequency_response(
+            b, a, check_args.samplerate, check_args.wor_n
+        )
+        delay_freq, delay_samples, delay_ms = check_filter.compute_group_delay(
+            b, a, check_args.samplerate, check_args.wor_n
+        )
+        zeros, poles, max_pole_abs, is_stable = check_filter.compute_poles_zeros(b, a)
+        y = signal.lfilter(b, a, x)
+        mask_freq = frequencies <= check_args.plot_max_freq
+        mask_delay = (delay_freq <= check_args.plot_max_freq) & np.isfinite(delay_ms) & np.isfinite(delay_samples)
+        gain_target_db = check_filter.nearest_value(frequencies, response_db, check_args.target_freq)
+        delay_target_ms = abs(check_filter.nearest_value(delay_freq, delay_ms, check_args.target_freq))
+
+        ax_response.plot(
+            frequencies[mask_freq],
+            response_db[mask_freq],
+            color=color,
+            label=f"Rank {rank}, Q={candidate.q_value:.1f}, target={gain_target_db:.1f} dB",
+        )
+        ax_delay.plot(
+            delay_freq[mask_delay],
+            delay_ms[mask_delay],
+            color=color,
+            label=f"Rank {rank}, target delay={delay_target_ms:.1f} ms",
+        )
+        if zeros.size:
+            ax_zplane.scatter(
+                np.real(zeros),
+                np.imag(zeros),
+                marker="o",
+                facecolors="none",
+                edgecolors=color,
+                alpha=0.75,
+            )
+        if poles.size:
+            ax_zplane.scatter(
+                np.real(poles),
+                np.imag(poles),
+                marker="x",
+                color=color,
+                alpha=0.85,
+                label=f"Rank {rank} poles, max={max_pole_abs:.5f}",
+            )
+        if zeros.size or poles.size:
+            all_points = np.concatenate([zeros, poles]) if zeros.size and poles.size else (zeros if zeros.size else poles)
+            z_limit = max(z_limit, math.ceil(float(np.max(np.abs(all_points))) * 10.0) / 10.0 + 0.1)
+
+        ax_time.plot(
+            time_sec[mask_time] * 1000.0,
+            y[mask_time],
+            color=color,
+            label=f"Rank {rank} output",
+        )
+        stable_text = "stable" if is_stable else "unstable"
+        summaries.append(
+            f"Rank {rank}: target gain={gain_target_db:.2f} dB, "
+            f"|delay|={delay_target_ms:.2f} ms, max |pole|={max_pole_abs:.8f}, {stable_text}"
+        )
+
     ax_response.axhline(-3.0, linestyle=":", linewidth=1.0, label="-3 dB")
     for freq in test_freqs:
-        gain_db = check_filter.nearest_value(frequencies, response_db, freq)
-        ratio = float(check_filter.db_to_amplitude_ratio(gain_db))
         is_target = np.isclose(freq, check_args.target_freq)
         label_prefix = "target" if is_target else "test"
         linestyle = "--" if is_target else ":"
@@ -721,9 +1172,9 @@ def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argpa
             freq,
             linestyle=linestyle,
             linewidth=1.0,
-            label=f"{label_prefix} {freq:g} Hz: {gain_db:.1f} dB, {ratio:.3g}x",
+            label=f"{label_prefix} {freq:g} Hz",
         )
-    ax_response.set_title(f"Rank {rank} detail: frequency response")
+    ax_response.set_title(f"Detail overlay: frequency response ({len(detail_ranks)} ranks)")
     ax_response.set_xlabel("Frequency [Hz]")
     ax_response.set_ylabel("Gain [dB]")
     ax_response.set_xlim(0.0, check_args.plot_max_freq)
@@ -737,9 +1188,7 @@ def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argpa
         lambda axis: check_filter.sync_ratio_axis_to_db_axis(axis, ratio_axis),
     )
 
-    ax_delay.plot(delay_freq[mask_delay], delay_ms[mask_delay], label=f"Rank {rank} group delay")
     for freq in test_freqs:
-        delay_at_freq = check_filter.nearest_value(delay_freq, delay_ms, freq)
         is_target = np.isclose(freq, check_args.target_freq)
         label_prefix = "target" if is_target else "test"
         linestyle = "--" if is_target else ":"
@@ -747,9 +1196,9 @@ def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argpa
             freq,
             linestyle=linestyle,
             linewidth=1.0,
-            label=f"{label_prefix} {freq:g} Hz: {delay_at_freq:.1f} ms",
+            label=f"{label_prefix} {freq:g} Hz",
         )
-    ax_delay.set_title(f"Rank {rank} detail: group delay")
+    ax_delay.set_title(f"Detail overlay: group delay ({len(detail_ranks)} ranks)")
     ax_delay.set_xlabel("Frequency [Hz]")
     ax_delay.set_ylabel("Delay [ms]")
     ax_delay.set_xlim(0.0, check_args.plot_max_freq)
@@ -760,47 +1209,25 @@ def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argpa
     ax_zplane.plot(np.cos(theta), np.sin(theta), linestyle="--", linewidth=1.0, label="Unit circle")
     ax_zplane.axhline(0.0, linewidth=0.8)
     ax_zplane.axvline(0.0, linewidth=0.8)
-    if zeros.size:
-        ax_zplane.scatter(np.real(zeros), np.imag(zeros), marker="o", facecolors="none", label="Zeros")
-    if poles.size:
-        ax_zplane.scatter(np.real(poles), np.imag(poles), marker="x", label="Poles")
-    limit = 1.1
-    if zeros.size or poles.size:
-        all_points = np.concatenate([zeros, poles]) if zeros.size and poles.size else (zeros if zeros.size else poles)
-        max_abs = float(np.max(np.abs(all_points)))
-        limit = max(1.1, math.ceil(max_abs * 10.0) / 10.0 + 0.1)
-    ax_zplane.set_title(f"Rank {rank} pole-zero (max |pole|={max_pole_abs:.6f}, stable={'yes' if is_stable else 'no'})")
+    ax_zplane.set_title("Detail overlay: pole-zero plot")
     ax_zplane.set_xlabel("Real")
     ax_zplane.set_ylabel("Imaginary")
-    ax_zplane.set_xlim(-limit, limit)
-    ax_zplane.set_ylim(-limit, limit)
+    ax_zplane.set_xlim(-z_limit, z_limit)
+    ax_zplane.set_ylim(-z_limit, z_limit)
     ax_zplane.set_aspect("equal", adjustable="box")
     ax_zplane.grid(True)
     ax_zplane.legend(loc="best")
 
     component_text = "+".join(f"{freq:g}Hz" for freq in test_freqs)
     ax_time.plot(time_sec[mask_time] * 1000.0, x[mask_time], label=f"Input ({component_text})")
-    ax_time.plot(time_sec[mask_time] * 1000.0, y[mask_time], label="Output (lfilter, causal)")
-    ax_time.set_title(f"Rank {rank} detail: time waveform")
+    ax_time.set_title(f"Detail overlay: time waveform ({len(detail_ranks)} ranks)")
     ax_time.set_xlabel("Time [ms]")
     ax_time.set_ylabel("Amplitude")
     ax_time.grid(True)
     ax_time.legend(loc="best")
 
-    summary = check_filter.make_summary_text(
-        frequencies,
-        response_db,
-        delay_freq,
-        delay_ms,
-        check_args.target_freq,
-        test_freqs,
-        poles,
-        max_pole_abs,
-        is_stable,
-        check_args.samplerate,
-    )
-    print(f"Rank {rank} detail summary:")
-    print(summary)
+    print("Detail overlay summary:")
+    print("\n".join(summaries))
 
 
 def plot_combined_sheet(candidates: list[FilterCandidate], args: argparse.Namespace) -> bool:
@@ -813,16 +1240,17 @@ def plot_combined_sheet(candidates: list[FilterCandidate], args: argparse.Namesp
         print("matplotlib が見つからないためグラフ表示をスキップ.")
         return False
 
-    detail_rank = min(max(args.detail_rank, 1), len(candidates))
-    fig, axes = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
-    fig.suptitle(f"Peak filter design overview + Rank {detail_rank} detail")
-    draw_candidate_overview(candidates, args, axes[0, 0], axes[0, 1])
-    draw_single_filter_detail(
-        candidates[detail_rank - 1],
-        detail_rank,
-        args,
-        (axes[1, 0], axes[1, 1], axes[2, 0], axes[2, 1]),
+    detail_ranks = parse_rank_selection(args.detail_ranks, len(candidates))
+    fig = plt.figure(figsize=(16, 10))
+    grid = fig.add_gridspec(2, 2)
+    fig.suptitle(f"Peak filter detail overlays ({args.detail_ranks})")
+    detail_axes = (
+        fig.add_subplot(grid[0, 0]),
+        fig.add_subplot(grid[0, 1]),
+        fig.add_subplot(grid[1, 0]),
+        fig.add_subplot(grid[1, 1]),
     )
+    draw_filter_details_overlay(candidates, detail_ranks, args, detail_axes)
 
     if args.save_figure:
         save_path = Path(args.save_figure)
@@ -830,7 +1258,11 @@ def plot_combined_sheet(candidates: list[FilterCandidate], args: argparse.Namesp
         fig.savefig(save_path, dpi=150)
         print(f"Figure saved: {save_path}")
 
-    plt.show()
+    enable_rank_check_panel(fig, fig.axes)
+    if is_non_interactive_matplotlib_backend(plt.get_backend()):
+        plt.close(fig)
+    else:
+        plt.show(block=True)
     return True
 
 
@@ -906,7 +1338,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gpass-values", default=DEFAULT_GPASS_VALUES)
     parser.add_argument("--gstop-values", default=DEFAULT_GSTOP_VALUES)
     parser.add_argument("--acceptable-gain-db", type=float, default=DEFAULT_ACCEPTABLE_GAIN_DB)
+    parser.add_argument(
+        "--max-target-gain-db",
+        type=float,
+        default=DEFAULT_MAX_TARGET_GAIN_DB,
+        help="target周波数で許容する最大ゲイン[dB]. 0以下で制限なし.",
+    )
     parser.add_argument("--max-q", type=float, default=DEFAULT_MAX_Q)
+    parser.add_argument(
+        "--max-target-delay-ms",
+        type=float,
+        default=DEFAULT_MAX_TARGET_DELAY_MS,
+        help="target周波数で許容する最大群遅延[ms]. 0以下で制限なし.",
+    )
     parser.add_argument("--max-pole-abs", type=float, default=DEFAULT_MAX_POLE_ABS)
     parser.add_argument(
         "--max-direct-form-order",
@@ -934,10 +1378,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="自動チェックするRank. all, 1, 1-10, 1,3,5 など.",
     )
     parser.add_argument(
+        "--detail-ranks",
+        default=DEFAULT_DETAIL_RANKS,
+        help="1枚まとめ表示で詳細確認するRank. all, 1, 1-10, 1,3,5 など.",
+    )
+    parser.add_argument(
         "--detail-rank",
         type=int,
-        default=DEFAULT_DETAIL_RANK,
-        help="1枚まとめ表示で詳細確認するRank.",
+        help="旧指定用. 指定すると --detail-ranks と同じ意味で単一Rankを表示.",
     )
     parser.add_argument(
         "--separate-check-plots",
@@ -978,10 +1426,16 @@ def validate_args(args: argparse.Namespace):
         raise ValueError("top_n は正の整数")
     if not 0 < args.max_pole_abs <= 1:
         raise ValueError("max_pole_abs は 0より大きく1以下")
+    if args.max_target_gain_db is not None and args.max_target_gain_db <= 0:
+        args.max_target_gain_db = None
+    if args.max_target_delay_ms is not None and args.max_target_delay_ms <= 0:
+        args.max_target_delay_ms = None
     if args.max_direct_form_order <= 0:
         args.max_direct_form_order = None
-    if args.detail_rank <= 0:
-        raise ValueError("detail-rank は正の整数")
+    if args.detail_rank is not None:
+        if args.detail_rank <= 0:
+            raise ValueError("detail-rank は正の整数")
+        args.detail_ranks = str(args.detail_rank)
 
 
 def main(argv: list[str] | None = None) -> int:

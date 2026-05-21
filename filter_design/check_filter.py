@@ -153,6 +153,63 @@ def sync_ratio_axis_to_db_axis(db_axis, ratio_axis):
     )
 
 
+def enable_interactive_legends(fig, axes):
+    """Toggle plotted artists by clicking legend items."""
+    pick_map = {}
+    axes_list = np.ravel(np.asarray(axes, dtype=object)).tolist()
+
+    for ax in axes_list:
+        legend = ax.get_legend()
+        if legend is None:
+            continue
+
+        original_handles, _ = ax.get_legend_handles_labels()
+        legend_handles = getattr(legend, "legend_handles", None)
+        if legend_handles is None:
+            legend_handles = getattr(legend, "legendHandles", [])
+        legend_texts = legend.get_texts()
+        item_count = min(len(original_handles), len(legend_handles), len(legend_texts))
+
+        for index in range(item_count):
+            original = original_handles[index]
+            legend_items = [legend_handles[index], legend_texts[index]]
+            try:
+                original.set_picker(8)
+                if hasattr(original, "set_pickradius"):
+                    original.set_pickradius(8)
+                pick_map[original] = (original, legend_items)
+            except Exception:
+                pass
+            for item in legend_items:
+                item.set_picker(8)
+                if hasattr(item, "set_pickradius"):
+                    item.set_pickradius(8)
+                pick_map[item] = (original, legend_items)
+
+    if not pick_map:
+        return
+
+    old_cid = getattr(fig, "_interactive_legend_cid", None)
+    if old_cid is not None:
+        fig.canvas.mpl_disconnect(old_cid)
+
+    def on_pick(event):
+        picked = event.artist
+        if picked not in pick_map:
+            return
+
+        original, legend_items = pick_map[picked]
+        visible = not original.get_visible()
+        original.set_visible(visible)
+        alpha = 1.0 if visible else 0.2
+        for item in legend_items:
+            item.set_alpha(alpha)
+        fig.canvas.draw_idle()
+
+    fig._interactive_legend_map = pick_map
+    fig._interactive_legend_cid = fig.canvas.mpl_connect("pick_event", on_pick)
+
+
 def load_coefficients_from_json(path: Path, rank: int) -> tuple[np.ndarray, np.ndarray, dict]:
     """design_peak_filter.py の JSON 出力, または {a,b} を含む JSON から係数を読む."""
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -551,8 +608,9 @@ def plot_all(
         print(f"Figure saved: {save_path}")
 
     print(info_text)
+    enable_interactive_legends(fig, fig.axes)
     if not args.no_show:
-        plt.show()
+        plt.show(block=True)
     else:
         plt.close(fig)
 
