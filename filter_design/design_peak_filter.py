@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -68,6 +69,15 @@ DEFAULT_WOR_N = 16000
 
 # グラフで表示する最大周波数.
 DEFAULT_PLOT_MAX_FREQ = 60.0
+
+# フィルタ探索後に最良候補を自動で検証する.
+DEFAULT_AUTO_CHECK_FILTER = True
+
+# 自動チェックするRank. allなら表示候補すべて.
+DEFAULT_CHECK_RANKS = "all"
+
+# 1枚にまとめる詳細表示のRank.
+DEFAULT_DETAIL_RANK = 1
 
 
 SCIPY_INSTALL_MESSAGE = (
@@ -397,31 +407,35 @@ def save_candidates(path: Path, args: argparse.Namespace, candidates: list[Filte
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace):
-    if not candidates or args.no_plot:
-        return
-
-    try:
-        import matplotlib.pyplot as plt
-    except ModuleNotFoundError:
-        print("matplotlib が見つからないためグラフ表示をスキップ.")
-        return
-
+def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Namespace, ax_response, ax_delay):
     signal = require_scipy_signal()
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
-    ax_response, ax_delay = axes
 
     for rank, candidate in enumerate(candidates, start=1):
         mask = candidate.frequencies <= args.plot_max_freq
-        label = f"Rank {rank}, Q={candidate.q_value:.1f}, order={candidate.direct_form_order}"
+        label = (
+            f"Rank {rank}, Q={candidate.q_value:.1f}, "
+            f"order={candidate.direct_form_order}, "
+            f"target={candidate.gain_at_target_db:.1f} dB"
+        )
         ax_response.plot(candidate.frequencies[mask], candidate.response_db[mask], label=label)
 
         try:
-            w, delay_samples = signal.group_delay((candidate.b, candidate.a), w=args.wor_n)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*denominator is extremely small.*",
+                    category=UserWarning,
+                )
+                w, delay_samples = signal.group_delay((candidate.b, candidate.a), w=args.wor_n)
             delay_freq = w / (2.0 * np.pi) * args.samplerate
             delay_ms = delay_samples / args.samplerate * 1000.0
             delay_mask = delay_freq <= args.plot_max_freq
-            ax_delay.plot(delay_freq[delay_mask], delay_ms[delay_mask], label=f"Rank {rank}")
+            target_delay = float(np.interp(args.target_freq, delay_freq, delay_ms))
+            ax_delay.plot(
+                delay_freq[delay_mask],
+                delay_ms[delay_mask],
+                label=f"Rank {rank}, target delay={target_delay:.1f} ms",
+            )
         except Exception as exc:  # scipyの数値警告で失敗する候補あり.
             print(f"Rank {rank} の群遅延表示をスキップ: {exc}")
 
@@ -448,6 +462,20 @@ def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace)
     ax_delay.set_xlim(0, args.plot_max_freq)
     ax_delay.grid(True)
     ax_delay.legend(loc="best")
+
+
+def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace):
+    if not candidates or args.no_plot:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("matplotlib が見つからないためグラフ表示をスキップ.")
+        return
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
+    draw_candidate_overview(candidates, args, axes[0], axes[1])
 
     if args.save_figure:
         save_path = Path(args.save_figure)
@@ -567,11 +595,300 @@ def apply_interactive_inputs(args: argparse.Namespace):
         args.save_figure = ask_text("グラフ画像保存パス, 空なら保存なし", args.save_figure or "")
         if args.save_figure == "":
             args.save_figure = None
+    args.no_check_filter = not ask_bool("候補をcheck_filter.pyで自動確認する", not args.no_check_filter)
+    if not args.no_check_filter:
+        args.check_ranks = ask_text("自動確認するRank. all, 1, 1-10, 1,3,5 など", args.check_ranks)
+
+
+def apply_positional_args(args: argparse.Namespace):
+    values = getattr(args, "positional", [])
+    if not values:
+        return
+    if len(values) > 3:
+        raise ValueError("位置引数は target_freq, samplerate, family の最大3つ")
+    args.target_freq = float(values[0])
+    if len(values) >= 2:
+        args.samplerate = float(values[1])
+    if len(values) >= 3:
+        if values[2] not in ("butter", "cheby1", "cheby2", "ellip"):
+            raise ValueError("family は butter, cheby1, cheby2, ellip のいずれか")
+        args.family = values[2]
+
+
+def parse_rank_selection(text: str, candidate_count: int) -> list[int]:
+    text = (text or "all").strip().lower()
+    if text == "all":
+        return list(range(1, candidate_count + 1))
+
+    ranks: set[int] = set()
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_text, end_text = part.split("-", 1)
+            start = int(start_text)
+            end = int(end_text)
+            if start > end:
+                start, end = end, start
+            ranks.update(range(start, end + 1))
+        else:
+            ranks.add(int(part))
+
+    selected = sorted(rank for rank in ranks if 1 <= rank <= candidate_count)
+    if not selected:
+        raise ValueError("check-ranks の指定に有効なRankがない")
+    return selected
+
+
+def rank_output_path(path_text: str | None, rank: int, selected_count: int) -> str | None:
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if selected_count <= 1:
+        return str(path)
+    return str(path.with_name(f"{path.stem}_rank{rank:02d}{path.suffix}"))
+
+
+def build_check_args(args: argparse.Namespace, save_figure: str | None = None, save_info: str | None = None):
+    import check_filter
+
+    check_test_freqs = args.check_test_freqs or str(args.target_freq)
+    check_freq_count = len(parse_float_list(check_test_freqs))
+    check_test_amps = args.check_test_amps or ",".join(["1"] * check_freq_count)
+    check_argv = [
+        "--samplerate",
+        str(args.samplerate),
+        "--target-freq",
+        str(args.target_freq),
+        "--plot-max-freq",
+        str(args.plot_max_freq),
+        "--test-freqs",
+        check_test_freqs,
+        "--test-amps",
+        check_test_amps,
+    ]
+    if save_figure:
+        check_argv.extend(["--save-figure", save_figure])
+    if save_info:
+        check_argv.extend(["--save-info", save_info])
+    if args.check_no_show:
+        check_argv.append("--no-show")
+
+    check_args = check_filter.build_parser().parse_args(check_argv)
+    check_filter.validate_args(check_args)
+    return check_args
+
+
+def draw_single_filter_detail(candidate: FilterCandidate, rank: int, args: argparse.Namespace, axes):
+    import check_filter
+    from scipy import signal
+
+    check_args = build_check_args(args)
+    b = candidate.b
+    a = candidate.a
+    frequencies, response_db, _ = check_filter.compute_frequency_response(
+        b, a, check_args.samplerate, check_args.wor_n
+    )
+    delay_freq, delay_samples, delay_ms = check_filter.compute_group_delay(
+        b, a, check_args.samplerate, check_args.wor_n
+    )
+    zeros, poles, max_pole_abs, is_stable = check_filter.compute_poles_zeros(b, a)
+    test_freqs = check_filter.parse_float_list(check_args.test_freqs) if check_args.test_freqs else [check_args.target_freq]
+    test_amps = check_filter.parse_float_list(check_args.test_amps) if check_args.test_amps else [1.0] * len(test_freqs)
+    if len(test_amps) != len(test_freqs):
+        raise ValueError("--check-test-freqs と --check-test-amps の個数を一致させてください")
+
+    duration_sec = check_args.duration_ms / 1000.0
+    time_sec, x = check_filter.build_test_signal(check_args.samplerate, duration_sec, test_freqs, test_amps)
+    y = signal.lfilter(b, a, x)
+    plot_start_sec = check_args.settle_ms / 1000.0
+    plot_end_sec = min(duration_sec, plot_start_sec + check_args.plot_window_ms / 1000.0)
+    mask_time = (time_sec >= plot_start_sec) & (time_sec <= plot_end_sec)
+    mask_freq = frequencies <= check_args.plot_max_freq
+    mask_delay = (delay_freq <= check_args.plot_max_freq) & np.isfinite(delay_ms) & np.isfinite(delay_samples)
+
+    ax_response, ax_delay, ax_zplane, ax_time = axes
+    ax_response.plot(frequencies[mask_freq], response_db[mask_freq], label=f"Rank {rank} gain")
+    ax_response.axhline(-3.0, linestyle=":", linewidth=1.0, label="-3 dB")
+    for freq in test_freqs:
+        gain_db = check_filter.nearest_value(frequencies, response_db, freq)
+        ratio = float(check_filter.db_to_amplitude_ratio(gain_db))
+        is_target = np.isclose(freq, check_args.target_freq)
+        label_prefix = "target" if is_target else "test"
+        linestyle = "--" if is_target else ":"
+        ax_response.axvline(
+            freq,
+            linestyle=linestyle,
+            linewidth=1.0,
+            label=f"{label_prefix} {freq:g} Hz: {gain_db:.1f} dB, {ratio:.3g}x",
+        )
+    ax_response.set_title(f"Rank {rank} detail: frequency response")
+    ax_response.set_xlabel("Frequency [Hz]")
+    ax_response.set_ylabel("Gain [dB]")
+    ax_response.set_xlim(0.0, check_args.plot_max_freq)
+    ax_response.grid(True)
+    ax_response.legend(loc="best")
+    ratio_axis = ax_response.twinx()
+    ratio_axis.set_ylabel("Amplitude ratio")
+    check_filter.sync_ratio_axis_to_db_axis(ax_response, ratio_axis)
+    ax_response.callbacks.connect(
+        "ylim_changed",
+        lambda axis: check_filter.sync_ratio_axis_to_db_axis(axis, ratio_axis),
+    )
+
+    ax_delay.plot(delay_freq[mask_delay], delay_ms[mask_delay], label=f"Rank {rank} group delay")
+    for freq in test_freqs:
+        delay_at_freq = check_filter.nearest_value(delay_freq, delay_ms, freq)
+        is_target = np.isclose(freq, check_args.target_freq)
+        label_prefix = "target" if is_target else "test"
+        linestyle = "--" if is_target else ":"
+        ax_delay.axvline(
+            freq,
+            linestyle=linestyle,
+            linewidth=1.0,
+            label=f"{label_prefix} {freq:g} Hz: {delay_at_freq:.1f} ms",
+        )
+    ax_delay.set_title(f"Rank {rank} detail: group delay")
+    ax_delay.set_xlabel("Frequency [Hz]")
+    ax_delay.set_ylabel("Delay [ms]")
+    ax_delay.set_xlim(0.0, check_args.plot_max_freq)
+    ax_delay.grid(True)
+    ax_delay.legend(loc="best")
+
+    theta = np.linspace(0.0, 2.0 * np.pi, 720)
+    ax_zplane.plot(np.cos(theta), np.sin(theta), linestyle="--", linewidth=1.0, label="Unit circle")
+    ax_zplane.axhline(0.0, linewidth=0.8)
+    ax_zplane.axvline(0.0, linewidth=0.8)
+    if zeros.size:
+        ax_zplane.scatter(np.real(zeros), np.imag(zeros), marker="o", facecolors="none", label="Zeros")
+    if poles.size:
+        ax_zplane.scatter(np.real(poles), np.imag(poles), marker="x", label="Poles")
+    limit = 1.1
+    if zeros.size or poles.size:
+        all_points = np.concatenate([zeros, poles]) if zeros.size and poles.size else (zeros if zeros.size else poles)
+        max_abs = float(np.max(np.abs(all_points)))
+        limit = max(1.1, math.ceil(max_abs * 10.0) / 10.0 + 0.1)
+    ax_zplane.set_title(f"Rank {rank} pole-zero (max |pole|={max_pole_abs:.6f}, stable={'yes' if is_stable else 'no'})")
+    ax_zplane.set_xlabel("Real")
+    ax_zplane.set_ylabel("Imaginary")
+    ax_zplane.set_xlim(-limit, limit)
+    ax_zplane.set_ylim(-limit, limit)
+    ax_zplane.set_aspect("equal", adjustable="box")
+    ax_zplane.grid(True)
+    ax_zplane.legend(loc="best")
+
+    component_text = "+".join(f"{freq:g}Hz" for freq in test_freqs)
+    ax_time.plot(time_sec[mask_time] * 1000.0, x[mask_time], label=f"Input ({component_text})")
+    ax_time.plot(time_sec[mask_time] * 1000.0, y[mask_time], label="Output (lfilter, causal)")
+    ax_time.set_title(f"Rank {rank} detail: time waveform")
+    ax_time.set_xlabel("Time [ms]")
+    ax_time.set_ylabel("Amplitude")
+    ax_time.grid(True)
+    ax_time.legend(loc="best")
+
+    summary = check_filter.make_summary_text(
+        frequencies,
+        response_db,
+        delay_freq,
+        delay_ms,
+        check_args.target_freq,
+        test_freqs,
+        poles,
+        max_pole_abs,
+        is_stable,
+        check_args.samplerate,
+    )
+    print(f"Rank {rank} detail summary:")
+    print(summary)
+
+
+def plot_combined_sheet(candidates: list[FilterCandidate], args: argparse.Namespace) -> bool:
+    if not candidates or args.no_plot or args.no_check_filter:
+        return False
+
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("matplotlib が見つからないためグラフ表示をスキップ.")
+        return False
+
+    detail_rank = min(max(args.detail_rank, 1), len(candidates))
+    fig, axes = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
+    fig.suptitle(f"Peak filter design overview + Rank {detail_rank} detail")
+    draw_candidate_overview(candidates, args, axes[0, 0], axes[0, 1])
+    draw_single_filter_detail(
+        candidates[detail_rank - 1],
+        detail_rank,
+        args,
+        (axes[1, 0], axes[1, 1], axes[2, 0], axes[2, 1]),
+    )
+
+    if args.save_figure:
+        save_path = Path(args.save_figure)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150)
+        print(f"Figure saved: {save_path}")
+
+    plt.show()
+    return True
+
+
+def run_check_filters(candidates: list[FilterCandidate], args: argparse.Namespace):
+    if args.no_check_filter:
+        return
+
+    try:
+        import check_filter
+    except Exception as exc:
+        print(f"check_filter.py の読み込みをスキップ: {exc}")
+        return
+
+    selected_ranks = parse_rank_selection(args.check_ranks, len(candidates))
+    check_test_freqs = args.check_test_freqs or str(args.target_freq)
+    check_freq_count = len(parse_float_list(check_test_freqs))
+    check_test_amps = args.check_test_amps or ",".join(["1"] * check_freq_count)
+
+    for rank in selected_ranks:
+        candidate = candidates[rank - 1]
+        print(f"check_filter.py auto check: Rank {rank}/{len(candidates)}")
+        check_argv = [
+            "--samplerate",
+            str(args.samplerate),
+            "--target-freq",
+            str(args.target_freq),
+            "--plot-max-freq",
+            str(args.plot_max_freq),
+            "--test-freqs",
+            check_test_freqs,
+            "--test-amps",
+            check_test_amps,
+        ]
+        figure_path = rank_output_path(args.check_save_figure, rank, len(selected_ranks))
+        info_path = rank_output_path(args.check_save_info, rank, len(selected_ranks))
+        if figure_path:
+            check_argv.extend(["--save-figure", figure_path])
+        if info_path:
+            check_argv.extend(["--save-info", info_path])
+        if args.check_no_show:
+            check_argv.append("--no-show")
+
+        check_args = check_filter.build_parser().parse_args(check_argv)
+        check_filter.validate_args(check_args)
+        metadata = candidate.to_json_dict()
+        metadata["source"] = "design_peak_filter.py auto check"
+        metadata["rank"] = rank
+        check_filter.plot_all(candidate.b, candidate.a, check_args, metadata)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="狙った刺激周波数を強調するピークフィルタを探索, 設計する."
+    )
+    parser.add_argument(
+        "positional",
+        nargs="*",
+        help="省略指定: target_freq [samplerate] [butter|cheby1|cheby2|ellip]",
     )
     parser.add_argument("--samplerate", type=float, default=DEFAULT_SAMPLERATE)
     parser.add_argument("--target-freq", type=float, default=DEFAULT_TARGET_FREQ)
@@ -605,6 +922,39 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-plot", action="store_true", help="グラフ表示を行わない.")
     parser.add_argument("--no-progress", dest="progress", action="store_false", help="進捗表示を行わない.")
     parser.add_argument("--interactive", action="store_true", help="対話入力で設定する.")
+    parser.add_argument(
+        "--no-check-filter",
+        action="store_true",
+        default=not DEFAULT_AUTO_CHECK_FILTER,
+        help="探索後のcheck_filter.py自動実行を行わない.",
+    )
+    parser.add_argument(
+        "--check-ranks",
+        default=DEFAULT_CHECK_RANKS,
+        help="自動チェックするRank. all, 1, 1-10, 1,3,5 など.",
+    )
+    parser.add_argument(
+        "--detail-rank",
+        type=int,
+        default=DEFAULT_DETAIL_RANK,
+        help="1枚まとめ表示で詳細確認するRank.",
+    )
+    parser.add_argument(
+        "--separate-check-plots",
+        action="store_true",
+        help="まとめ表示後にもcheck_filter.pyの詳細図を別ウィンドウで表示する.",
+    )
+    parser.add_argument(
+        "--check-test-freqs",
+        help="自動チェック用テスト周波数. 例: 10,7,20. 省略時はtargetのみ.",
+    )
+    parser.add_argument(
+        "--check-test-amps",
+        help="自動チェック用テスト振幅. 例: 1,0.5,0.5. 省略時は1.",
+    )
+    parser.add_argument("--check-save-figure", help="自動チェック図の保存先.")
+    parser.add_argument("--check-save-info", help="自動チェック情報テキストの保存先.")
+    parser.add_argument("--check-no-show", action="store_true", help="自動チェック図を表示しない.")
     parser.set_defaults(progress=True)
     return parser
 
@@ -630,6 +980,8 @@ def validate_args(args: argparse.Namespace):
         raise ValueError("max_pole_abs は 0より大きく1以下")
     if args.max_direct_form_order <= 0:
         args.max_direct_form_order = None
+    if args.detail_rank <= 0:
+        raise ValueError("detail-rank は正の整数")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -638,6 +990,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw_argv)
     try:
         require_scipy_signal()
+        apply_positional_args(args)
         if args.interactive or len(raw_argv) == 0:
             apply_interactive_inputs(args)
         validate_args(args)
@@ -646,7 +999,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.output:
             save_candidates(args.output, args, candidates)
             print(f"Saved: {args.output}")
-        plot_candidates(candidates, args)
+        combined_shown = plot_combined_sheet(candidates, args)
+        if not combined_shown:
+            plot_candidates(candidates, args)
+        if candidates:
+            if args.separate_check_plots or args.no_plot:
+                run_check_filters(candidates, args)
+            elif args.check_save_info or args.check_save_figure:
+                saved_plot_args = argparse.Namespace(**vars(args))
+                saved_plot_args.check_no_show = True
+                run_check_filters(candidates, saved_plot_args)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

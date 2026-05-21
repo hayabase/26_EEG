@@ -427,8 +427,24 @@ def plot_all(
 
     # 1. 周波数特性
     ax_response.plot(frequencies[mask_freq], response_db[mask_freq], label="Gain")
-    ax_response.axvline(args.target_freq, linestyle="--", linewidth=1.0, label="target")
     ax_response.axhline(-3.0, linestyle=":", linewidth=1.0, label="-3 dB")
+    used_freq_labels: set[float] = set()
+    for freq in test_freqs:
+        rounded_freq = round(freq, 12)
+        if rounded_freq in used_freq_labels:
+            continue
+        used_freq_labels.add(rounded_freq)
+        gain_db = nearest_value(frequencies, response_db, freq)
+        ratio = float(db_to_amplitude_ratio(gain_db))
+        is_target = math.isclose(freq, args.target_freq, rel_tol=0.0, abs_tol=1e-12)
+        label_prefix = "target" if is_target else "test"
+        linestyle = "--" if is_target else ":"
+        ax_response.axvline(
+            freq,
+            linestyle=linestyle,
+            linewidth=1.0,
+            label=f"{label_prefix} {freq:g} Hz: {gain_db:.1f} dB, {ratio:.3g}x",
+        )
     ax_response.set_title("Frequency response")
     ax_response.set_xlabel("Frequency [Hz]")
     ax_response.set_ylabel("Gain [dB]")
@@ -446,7 +462,22 @@ def plot_all(
 
     # 2. 群遅延
     ax_delay.plot(delay_freq[mask_delay], delay_ms[mask_delay], label="Group delay")
-    ax_delay.axvline(args.target_freq, linestyle="--", linewidth=1.0, label="target")
+    used_delay_labels: set[float] = set()
+    for freq in test_freqs:
+        rounded_freq = round(freq, 12)
+        if rounded_freq in used_delay_labels:
+            continue
+        used_delay_labels.add(rounded_freq)
+        delay_at_freq = nearest_value(delay_freq, delay_ms, freq)
+        is_target = math.isclose(freq, args.target_freq, rel_tol=0.0, abs_tol=1e-12)
+        label_prefix = "target" if is_target else "test"
+        linestyle = "--" if is_target else ":"
+        ax_delay.axvline(
+            freq,
+            linestyle=linestyle,
+            linewidth=1.0,
+            label=f"{label_prefix} {freq:g} Hz: {delay_at_freq:.1f} ms",
+        )
     ax_delay.set_title("Group delay")
     ax_delay.set_xlabel("Frequency [Hz]")
     ax_delay.set_ylabel("Delay [ms]")
@@ -481,7 +512,8 @@ def plot_all(
     ax_zplane.legend(loc="best")
 
     # 4. 時間波形
-    ax_time.plot(time_sec[mask_time] * 1000.0, x[mask_time], label="Input")
+    component_text = "+".join(f"{freq:g}Hz" for freq in test_freqs)
+    ax_time.plot(time_sec[mask_time] * 1000.0, x[mask_time], label=f"Input ({component_text})")
     ax_time.plot(time_sec[mask_time] * 1000.0, y[mask_time], label="Output (lfilter, causal)")
     ax_time.set_title("Time waveform")
     ax_time.set_xlabel("Time [ms]")
@@ -519,12 +551,20 @@ def plot_all(
         print(f"Figure saved: {save_path}")
 
     print(info_text)
-    plt.show()
+    if not args.no_show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="作成したデジタルフィルタの周波数特性・群遅延・極配置・時間波形を一括表示する."
+    )
+    parser.add_argument(
+        "source_path",
+        nargs="?",
+        help="省略指定: design_peak_filter.pyのJSON, またはDEFAULT_BANDPASS_A/Bを持つPythonファイル.",
     )
 
     source = parser.add_argument_group("係数の読み込み")
@@ -554,8 +594,23 @@ def build_parser() -> argparse.ArgumentParser:
     output.add_argument("--save-figure", help="グラフ画像の保存先. 例: filter_check.png")
     output.add_argument("--save-info", help="判定結果や極情報のテキスト保存先. 例: filter_check_info.txt")
     output.add_argument("--dpi", type=int, default=150, help="保存画像のDPI")
+    output.add_argument("--no-show", action="store_true", help="グラフウィンドウを表示しない.")
+    parser.add_argument("--interactive", action="store_true", help="対話入力で設定する.")
 
     return parser
+
+
+def apply_source_path(args: argparse.Namespace):
+    if not args.source_path:
+        return
+    if args.filter_json or args.module or args.a or args.b:
+        return
+
+    source_path = Path(args.source_path)
+    if source_path.suffix.lower() == ".py":
+        args.module = str(source_path)
+    else:
+        args.filter_json = str(source_path)
 
 
 def validate_args(args: argparse.Namespace):
@@ -575,12 +630,14 @@ def validate_args(args: argparse.Namespace):
         raise ValueError("--delay-ylim は '最小,最大' の2値で指定してください")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(raw_argv)
 
     try:
-        if len(sys.argv) == 1:
+        apply_source_path(args)
+        if args.interactive or len(raw_argv) == 0:
             apply_interactive_inputs(args)
         validate_args(args)
         b, a, metadata = load_coefficients(args)

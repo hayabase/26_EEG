@@ -1,0 +1,8 @@
+source=design_peak_filter.py auto check, rank=1, family=butter, order=4, Q=7.27
+target 10 Hz: gain=-0.00 dB (1.000x), group delay=320.81 ms
+max |pole|=0.99704456, stable=yes
+poles:
+  0.995272 - 0.059428j, |p|=0.997045, angle_freq=-9.492 Hz
+  0.995272 + 0.059428j, |p|=0.997045, angle_freq=9.492 Hz
+  0.994575 - 0.065605j, |p|=0.996737, angle_freq=-10.483 Hz
+  0.994575 + 0.065605j, |p|=0.996737, angle_freq=10.483 Hz
