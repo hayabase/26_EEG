@@ -71,6 +71,7 @@ python -c "import numpy, scipy, matplotlib, serial; print('ok')"
 | `analysis/Wavelet.py` | チャンネル別ウェーブレット解析 |
 | `analysis/PhaseTiming.py` | 刺激周期ごとの位相タイミング確認 |
 | `filter_design/design_peak_filter.py` | 指定周波数を強調するIIRピークフィルタ探索 |
+| `filter_design/design_bandpass_filter.py` | 通過域, 遷移域を直接指定するIIR BPF設計 |
 | `filter_design/check_filter.py` | a,b係数の周波数特性, 遅延, 極配置確認 |
 | `hardware/` | ハードウェア関連メモ |
 
@@ -172,6 +173,14 @@ python analysis\FFT.py C:\Users\g2110\Documents\EEG\26_EEG\measurement\measureme
 
 ```powershell
 python filter_design\design_peak_filter.py 10
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 1
+python filter_design\design_peak_filter.py 10 --target-delay-ms 1
+```
+
+通過域と遷移域を直接指定してBPFを設計.
+
+```powershell
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 3.0
 ```
 
 対話なしで条件を指定.
@@ -219,6 +228,7 @@ IIRバンドパスは周波数を鋭く強調できるが, 遅延と過渡応答
 | グラフが表示されない | Matplotlibバックエンド, 実行環境, `--no-show` 指定の有無 |
 | フィルタ候補が出ない | `--max-q`, `--max-delay-ms`, `--max-pole-abs`, 探索幅 |
 | 解析の横軸が短い | 入力データフォルダ, `serial_samples.csv`, サンプリング周波数推定 |
+| シリアル受信が欠落する | WindowsのCOM詳細設定でFIFO受信バッファを小さくすることも試す. 詳細は [hardware_README.md](hardware/hardware_README.md) |
 
 ## よく使うコマンド
 
@@ -229,6 +239,7 @@ python measurement\offline_max2_parallel_measurement.py --com 1
 python analysis\FFT.py max2_parallel_20260520_185539
 python analysis\Wavelet.py max2_parallel_20260520_185539
 python filter_design\design_peak_filter.py 10
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 3.0
 python filter_design\check_filter.py --json filter_design\peak_10hz.json
 python analysis\PhaseTiming.py max2_parallel_20260520_185539
 ```

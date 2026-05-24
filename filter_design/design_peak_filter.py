@@ -3,8 +3,9 @@
 狙った刺激周波数を強調するピークフィルタを探索, 設計するスクリプト.
 
 例:
-    python filter_design/design_peak_filter.py
+    python filter_design/design_peak_filter.py 10
     python filter_design/design_peak_filter.py --target-freq 10 --samplerate 1000
+    python filter_design/design_peak_filter.py 10 --max-target-delay-ms 1
     python filter_design/design_peak_filter.py --target-freq 7.5 --output filter_design/filter_7_5hz.json
 """
 
@@ -1347,9 +1348,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-q", type=float, default=DEFAULT_MAX_Q)
     parser.add_argument(
         "--max-target-delay-ms",
+        "--target-delay-ms",
         type=float,
         default=DEFAULT_MAX_TARGET_DELAY_MS,
-        help="target周波数で許容する最大群遅延[ms]. 0以下で制限なし.",
+        help="target周波数で許容する最大群遅延[ms]. 1なら1ms以下. 0以下で制限なし.",
     )
     parser.add_argument("--max-pole-abs", type=float, default=DEFAULT_MAX_POLE_ABS)
     parser.add_argument(
@@ -1365,7 +1367,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-figure", help="周波数特性グラフを画像保存するパス.")
     parser.add_argument("--no-plot", action="store_true", help="グラフ表示を行わない.")
     parser.add_argument("--no-progress", dest="progress", action="store_false", help="進捗表示を行わない.")
-    parser.add_argument("--interactive", action="store_true", help="対話入力で設定する.")
+    parser.add_argument("--interactive", action="store_true", help="対話入力で設定する. 指定しない場合はコマンド引数と既定値だけで実行.")
     parser.add_argument(
         "--no-check-filter",
         action="store_true",
@@ -1445,7 +1447,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         require_scipy_signal()
         apply_positional_args(args)
-        if args.interactive or len(raw_argv) == 0:
+        if args.interactive:
             apply_interactive_inputs(args)
         validate_args(args)
         candidates = find_candidates(args)

@@ -10,6 +10,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 | :--- | :--- |
 | [filter_README.md](filter_README.md) | フィルタ設計コード全体の説明 |
 | [design_peak_filter.py](design_peak_filter.py) | target周波数を強調するIIRピーク/BPF候補を探索 |
+| [design_bandpass_filter.py](design_bandpass_filter.py) | 通過域, 遷移域を直接指定してIIR BPFを設計 |
 | [check_filter.py](check_filter.py) | 作成済み係数の周波数特性, 群遅延, 極配置を確認 |
 | `_tmp_auto_check.txt` | 自動確認時の一時出力, 必要なければ削除可能 |
 
@@ -17,6 +18,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 
 - [使う前の準備](#使う前の準備)
 - [design_peak_filter.py](#design_peak_filterpy)
+- [design_bandpass_filter.py](#design_bandpass_filterpy)
 - [探索条件](#探索条件)
 - [グラフの見方](#グラフの見方)
 - [コンソール出力の見方](#コンソール出力の見方)
@@ -96,10 +98,63 @@ python filter_design\design_peak_filter.py 10 1000 cheby2
 python filter_design\design_peak_filter.py 10 1000 ellip
 ```
 
-引数なしで実行すると対話入力になる.
+引数なしで実行すると, コード冒頭の既定値だけで実行する.
+対話入力したい場合は `--interactive` を付ける.
 
 ```powershell
 python filter_design\design_peak_filter.py
+python filter_design\design_peak_filter.py --interactive
+```
+
+### よく使うコマンドまとめ
+
+基本:
+
+```powershell
+python filter_design\design_peak_filter.py 10
+```
+
+10Hzでの群遅延を1 ms以下に制限:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --target-delay-ms 1
+```
+
+同じ意味の正式名:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 1
+```
+
+候補が出ない場合, 遅延制限を少し緩める:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --target-delay-ms 10
+python filter_design\design_peak_filter.py 10 --target-delay-ms 50
+```
+
+グラフなしでコンソール出力だけ確認:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --no-plot --no-check-filter
+```
+
+進捗表示も消して短く実行:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --no-plot --no-check-filter --no-progress
+```
+
+JSON保存:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --output filter_design\peak_10hz.json
+```
+
+保存したJSONを確認:
+
+```powershell
+python filter_design\check_filter.py --json filter_design\peak_10hz.json --rank 1
 ```
 
 ### JSON保存
@@ -126,6 +181,71 @@ python filter_design\design_peak_filter.py 10 --no-plot
 
 ```powershell
 python filter_design\design_peak_filter.py 10 --no-progress
+```
+
+## design_bandpass_filter.py
+
+### 目的
+
+通過域と遷移域を直接決めて, 仕様どおりのBPFを作る.
+`design_peak_filter.py` はtarget周波数中心の探索用.
+こちらは `9.5-10.5 Hzを通過域, その外側3 Hzを遷移域` のように明示して設計する.
+
+グラフ表示は, 周波数特性, 群遅延, 極配置, 時間波形を1枚で表示する.
+周波数特性では通過域を緑, 遷移域を橙, 阻止域を灰色で表示する.
+左側の `R1`, `R2` などのチェックで, Rankごとの線を表示, 非表示にできる.
+
+### 基本実行
+
+対話入力で実行:
+
+```powershell
+python filter_design\design_bandpass_filter.py
+```
+
+通過域と遷移域を指定:
+
+```powershell
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 3.0
+```
+
+低周波側と高周波側の遷移域を別々に指定:
+
+```powershell
+python filter_design\design_bandpass_filter.py --pass-low 9.5 --pass-high 10.5 --transition-low 2.0 --transition-high 3.0
+```
+
+省略形:
+
+```powershell
+python filter_design\design_bandpass_filter.py 9.5 10.5 --transition 3.0
+```
+
+設計法を絞る:
+
+```powershell
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 3.0 --families butter,ellip
+```
+
+より鋭くする例:
+
+```powershell
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 1.0 --gstop 80
+```
+
+ただし, 遷移域を狭くしすぎたり `gstop` を大きくしすぎると, IIRの次数が上がる.
+このプロジェクトでは `PhaseTiming.py` へ貼りやすい直接形a,bを出すため, 高次数では極が1を超える数値不安定判定になり候補から除外されることがある.
+
+保存:
+
+```powershell
+python filter_design\design_bandpass_filter.py --passband 9.5,10.5 --transition 3.0 --save-json filter_design\bpf_10hz.json --save-figure filter_design\bpf_10hz.png
+```
+
+JSONは `check_filter.py` で確認できる:
+
+```powershell
+python filter_design\check_filter.py --json filter_design\bpf_10hz.json --rank 1
 ```
 
 ## 探索条件
@@ -161,6 +281,21 @@ python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0
 ```
 
 `0` 以下を指定すると制限なしになる項目がある.
+
+target周波数の群遅延を1 ms以下に絞る場合:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 1
+```
+
+または短い別名:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --target-delay-ms 1
+```
+
+1 msは指定可能だが, 鋭いIIR BPFではかなり厳しい.
+候補がゼロになる場合は `--max-target-delay-ms 10`, `--max-target-delay-ms 50` のように段階的に緩める.
 
 ### 条件を厳しくする例
 
