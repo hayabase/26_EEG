@@ -1,4 +1,4 @@
-name: eeg-max2
+name: 26eeg
 channels:
   - conda-forge
 dependencies:

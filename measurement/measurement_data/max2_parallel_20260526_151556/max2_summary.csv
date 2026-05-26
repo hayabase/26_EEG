@@ -1,0 +1,15 @@
+phase_name,channel,kind,rank,sample_index,experiment_time_s,value
+fixation_after,ch1,max,1,22341,21.4765376,1157.0
+fixation_after,ch1,max,2,22441,21.5765413,1143.0
+fixation_after,ch1,min,1,22972,22.1075745,-1159.0
+fixation_after,ch1,min,2,22572,21.7075769,-1157.0
+fixation_before,ch1,max,1,3230,2.6855511,1685.0
+fixation_before,ch1,max,2,3250,2.7055745,1682.0
+fixation_before,ch1,min,1,3079,2.5355631,-1699.0
+fixation_before,ch1,min,2,3240,2.6955413,-1699.0
+idle,ch1,max,1,5,0.0011128,1445.0
+idle,ch1,min,1,15,0.0019643,-1467.0
+stimulus,ch1,max,1,13776,12.9115572,1061.0
+stimulus,ch1,max,2,12313,11.4505579,1059.0
+stimulus,ch1,min,1,13806,12.9415412,-1079.0
+stimulus,ch1,min,2,13446,12.5815432,-1073.0
