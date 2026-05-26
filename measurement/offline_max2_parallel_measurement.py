@@ -29,7 +29,7 @@ DEFAULT_READY_TIMEOUT_SEC = 15.0  # シリアル準備完了を待つ最大秒�
 
 # 実験時間の初期値. stimulus_cycles を指定すると刺激秒数より優先.
 DEFAULT_PRE_FIXATION_SEC = 10.0  # 刺激前に中央注視点だけを表示する秒数.
-DEFAULT_STIMULUS_SEC = 3.0  # 点滅刺激を表示する秒数.
+DEFAULT_STIMULUS_SEC = 5.0  # 点滅刺激を表示する秒数.
 DEFAULT_STIMULUS_CYCLES: Optional[float] = None  # 点滅回数指定. None の場合は秒数指定を使用.
 DEFAULT_POST_FIXATION_SEC = 10.0  # 刺激後に中央注視点だけを表示する秒数.
 

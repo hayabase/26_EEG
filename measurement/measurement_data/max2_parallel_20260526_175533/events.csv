@@ -1,0 +1,9 @@
+event_index,event_name,phase_code,phase_name,frame_index,time_ns,experiment_time_s
+0,experiment_start,1,fixation_before,0,192405600928200,0.0
+1,fixation_before_start,1,fixation_before,0,192405601015700,8.75e-05
+2,fixation_before_end,1,fixation_before,600,192415525952700,9.9250245
+3,stimulus_start,2,stimulus,600,192415525958900,9.9250307
+4,stimulus_end,2,stimulus,900,192420525029100,14.9241009
+5,fixation_after_start,3,fixation_after,900,192420525035900,14.9241077
+6,fixation_after_end,3,fixation_after,1500,192430523392700,24.9224645
+7,experiment_end,8,finished,1500,192430523399700,24.9224715
