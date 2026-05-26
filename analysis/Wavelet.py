@@ -425,7 +425,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Comma-separated channels, e.g. ch1,ch2 or ch1,ch2,ch3.",
     )
     parser.add_argument("--min-freq", type=float, default=2.0, help="Minimum wavelet frequency.")
-    parser.add_argument("--max-freq", type=float, default=60.0, help="Maximum wavelet frequency.")
+    parser.add_argument("--max-freq", type=float, default=45.0, help="Maximum wavelet frequency.")
     parser.add_argument("--freq-count", type=int, default=64, help="Number of wavelet frequencies.")
     parser.add_argument(
         "--freq-scale",
