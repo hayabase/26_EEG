@@ -528,11 +528,22 @@ def print_candidates(candidates: list[FilterCandidate], spec: BandpassSpec) -> N
         print(f"  stable: {'yes' if candidate.stable else 'no'}")
         print()
 
-    best = candidates[0]
-    print("PhaseTiming.py へ貼る係数:")
-    print("DEFAULT_BANDPASS_A = " + format_tuple(best.a))
+    print("ランキング全ての係数 a,b:")
+    for rank, candidate in enumerate(candidates, start=1):
+        print(
+            f"# Rank {rank}: family={candidate.family}, "
+            f"prototype_order={candidate.order}, "
+            f"direct_form_order={candidate.direct_form_order}"
+        )
+        print(f"RANK_{rank}_BANDPASS_A = " + format_tuple(candidate.a))
+        print()
+        print(f"RANK_{rank}_BANDPASS_B = " + format_tuple(candidate.b))
+        print()
+
+    print("PhaseTiming.py へ貼る係数(Rank 1):")
+    print("DEFAULT_BANDPASS_A = " + format_tuple(candidates[0].a))
     print()
-    print("DEFAULT_BANDPASS_B = " + format_tuple(best.b))
+    print("DEFAULT_BANDPASS_B = " + format_tuple(candidates[0].b))
 
 
 def save_candidates(path: Path, args: argparse.Namespace, spec: BandpassSpec, candidates: list[FilterCandidate]) -> None:
