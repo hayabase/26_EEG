@@ -486,6 +486,13 @@ notch_bandwidth_hz = target_freq / Q
 | `--max-target-delay-ms` | `1000` | target周波数と周辺で許容する最大群遅延[ms] |
 | `--target-delay-neighborhood-width` | `1.0` | 群遅延上限を確認するtarget周波数周辺の半幅[Hz] |
 | `--target-delay-neighborhood-points` | `401` | 周辺群遅延を走査する点数 |
+| `--time-response-duration-ms` | `3000` | 短時間応答確認のシミュレーション時間[ms] |
+| `--time-response-start-ms` | `2000` | 短時間応答ゲインを評価する開始時刻[ms] |
+| `--time-response-window-ms` | `1000` | 短時間応答ゲインを評価する窓長[ms] |
+| `--min-time-response-gain-db` | `-3` | 短時間応答で許容する最小ゲイン[dB] |
+| `--rise-time-threshold-db` | `-3` | 立ち上がり時間として記録する到達しきい値[dB] |
+| `--rise-time-window-ms` | `200` | 立ち上がり時間を判定する移動RMS窓長[ms] |
+| `--no-time-response-gain-check` | OFF | 短時間応答ゲインの足切りを無効化 |
 | `--max-pole-abs` | `0.9998` | 極の絶対値上限 |
 | `--max-direct-form-order` | `10` | a,b直接形の最大次数 |
 | `--top-n` | `10` | 表示する候補数 |
@@ -522,6 +529,14 @@ python filter_design\design_peak_filter.py 10 --target-delay-ms 1
 
 1 msは指定可能だが, 鋭いIIR BPFではかなり厳しい.
 候補がゼロになる場合は `--max-target-delay-ms 10`, `--max-target-delay-ms 50` のように段階的に緩める.
+
+周波数特性では0 dBに近いのに時間波形で小さく見える場合は, 高Qフィルタの立ち上がりが遅い.
+`design_peak_filter.py` は既定で3秒入力の最後1秒を見て, `--min-time-response-gain-db -3`
+未満の候補を除外する. この確認を外す場合:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --no-time-response-gain-check
+```
 
 ### 条件を厳しくする例
 
@@ -620,6 +635,8 @@ Rank 1:
   Q: 64.00
   target_delay: 568.12 ms
   near_target_max_delay: 820.45 ms at 9.1200 Hz
+  time_response_gain: -1.20 dB (0.871x)
+  rise_time: 1814.00 ms to -3.00 dB
   max_pole_abs: 0.99970589
 ```
 
@@ -638,6 +655,8 @@ Rank 1:
 | `Q` | 鋭さ. 高いほど狭帯域 |
 | `target_delay` | target周波数での群遅延 |
 | `near_target_max_delay` | target周辺範囲での最大絶対群遅延 |
+| `time_response_gain` | 短時間の因果フィルタ出力で実際に出たRMSゲイン |
+| `rise_time` | 因果フィルタ出力が指定dBしきい値に初めて到達した時刻 |
 | `max_pole_abs` | 極の絶対値最大. 1未満なら理論上安定 |
 
 FIR版で追加される主な項目:
@@ -674,6 +693,10 @@ DEFAULT_BANDPASS_B = (
 
 これを `analysis/PhaseTiming.py` 冒頭の同名定数へ貼る.
 `PhaseTiming_ch1_minus_ch2.py` も `PhaseTiming.py` の係数を参照する.
+
+`design_peak_filter.py` では, Rank 1の `DEFAULT_BANDPASS_A/B` に加えて,
+最大Rank 10まで `RANK_01_BANDPASS_A/B`, `RANK_02_BANDPASS_A/B` ... の形式で係数を表示する.
+別Rankを試したい場合は, そのRankの `A/B` を `DEFAULT_BANDPASS_A/B` に貼り替える.
 
 一時的にコマンドラインで指定する場合:
 
@@ -863,6 +886,8 @@ python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0 
 ```
 
 周辺の群遅延だけが厳しい場合は, `--target-delay-neighborhood-width 0` でtarget一点のみの確認に戻せる.
+短時間応答ゲインだけが厳しい場合は, `--min-time-response-gain-db -6` のように緩めるか,
+`--no-time-response-gain-check` を指定する.
 
 ### Rankが似て見える
 

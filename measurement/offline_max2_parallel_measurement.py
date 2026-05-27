@@ -525,6 +525,7 @@ def init_window(config: ExperimentConfig) -> Tuple[Any, Any, int, int, float]:
         glfw.terminate()
         raise RuntimeError("GLFW window creation failed.")
 
+    glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
     glfw.make_context_current(window)
     glfw.swap_interval(1)
     return glfw, window, width, height, refresh_rate
@@ -752,6 +753,7 @@ def run_visual_experiment(config: ExperimentConfig, shared: SharedState, files: 
         shared.stop_event.set()
         set_windows_timer_resolution(False)
         if glfw is not None and window is not None:
+            glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
             glfw.destroy_window(window)
             glfw.terminate()
 

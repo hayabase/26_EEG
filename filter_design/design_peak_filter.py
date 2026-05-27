@@ -117,6 +117,14 @@ DEFAULT_TARGET_DELAY_NEIGHBORHOOD_WIDTH = 1.0
 # target周波数周辺の群遅延を走査する点数.
 DEFAULT_TARGET_DELAY_NEIGHBORHOOD_POINTS = 401
 
+# 短時間の因果フィルタ出力で, target正弦波が十分に立ち上がるか確認する.
+DEFAULT_TIME_RESPONSE_DURATION_MS = 3000.0
+DEFAULT_TIME_RESPONSE_START_MS = 2000.0
+DEFAULT_TIME_RESPONSE_WINDOW_MS = 1000.0
+DEFAULT_MIN_TIME_RESPONSE_GAIN_DB = -3.0
+DEFAULT_RISE_TIME_THRESHOLD_DB = -3.0
+DEFAULT_RISE_TIME_WINDOW_MS = 200.0
+
 # 極の絶対値の上限, 鋭いが単位円に近すぎる候補は避ける.
 DEFAULT_MAX_POLE_ABS = 0.9998
 
@@ -125,6 +133,9 @@ DEFAULT_MAX_DIRECT_FORM_ORDER = 10
 
 # 表示, 保存する候補数.
 DEFAULT_TOP_N = 10
+
+# コンソールへ係数を出力するRank数.
+DEFAULT_COEFFICIENT_RANKS = 10
 
 # 周波数応答の計算点数.
 DEFAULT_WOR_N = 16000
@@ -169,6 +180,10 @@ class FilterCandidate:
     target_delay_ms: float
     near_target_max_delay_ms: float
     near_target_delay_peak_freq_hz: float
+    time_response_gain_db: float
+    time_response_ratio: float
+    time_response_rise_time_ms: float
+    time_response_rise_threshold_db: float
     max_pole_abs: float
     frequencies: np.ndarray
     response_db: np.ndarray
@@ -197,6 +212,10 @@ class FilterCandidate:
             "target_delay_ms": self.target_delay_ms,
             "near_target_max_delay_ms": self.near_target_max_delay_ms,
             "near_target_delay_peak_freq_hz": self.near_target_delay_peak_freq_hz,
+            "time_response_gain_db": self.time_response_gain_db,
+            "time_response_ratio": self.time_response_ratio,
+            "time_response_rise_time_ms": self.time_response_rise_time_ms,
+            "time_response_rise_threshold_db": self.time_response_rise_threshold_db,
             "max_pole_abs": self.max_pole_abs,
         }
 
@@ -373,6 +392,75 @@ def target_and_near_delay_ms(
     )
 
 
+def build_time_response_input(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray, float]:
+    sample_count = int(round(args.time_response_duration_ms / 1000.0 * args.samplerate))
+    if sample_count <= 1:
+        raise ValueError("time_response_duration_ms が短すぎる")
+
+    time_sec = np.arange(sample_count, dtype=float) / args.samplerate
+    x = np.sin(2.0 * np.pi * args.target_freq * time_sec)
+    start_sec = args.time_response_start_ms / 1000.0
+    end_sec = start_sec + args.time_response_window_ms / 1000.0
+    mask = (time_sec >= start_sec) & (time_sec < end_sec)
+    if not np.any(mask):
+        raise ValueError("time response確認範囲が空. duration/start/windowを確認")
+
+    x_rms = float(np.sqrt(np.mean(x[mask] ** 2.0)))
+    if x_rms <= 0.0 or not np.isfinite(x_rms):
+        raise ValueError("time response入力RMSが不正")
+    return x, mask, x_rms
+
+
+def first_rise_time_ms(
+    x: np.ndarray,
+    y: np.ndarray,
+    samplerate: float,
+    threshold_db: float,
+    window_ms: float,
+) -> float:
+    window_samples = max(int(round(window_ms / 1000.0 * samplerate)), 1)
+    if x.size < window_samples or y.size < window_samples:
+        return math.nan
+
+    kernel = np.ones(window_samples, dtype=float) / window_samples
+    x_power = np.convolve(x * x, kernel, mode="valid")
+    y_power = np.convolve(y * y, kernel, mode="valid")
+    valid = (x_power > 0.0) & np.isfinite(x_power) & np.isfinite(y_power)
+    if not np.any(valid):
+        return math.nan
+
+    ratio = np.full_like(x_power, np.nan, dtype=float)
+    ratio[valid] = np.sqrt(y_power[valid] / x_power[valid])
+    threshold_ratio = float(db_to_amplitude_ratio(threshold_db))
+    hit_indexes = np.flatnonzero(valid & (ratio >= threshold_ratio))
+    if hit_indexes.size == 0:
+        return math.nan
+
+    end_sample = int(hit_indexes[0] + window_samples - 1)
+    return float(end_sample / samplerate * 1000.0)
+
+
+def causal_time_response_metrics(signal, b: np.ndarray, a: np.ndarray, x: np.ndarray, mask: np.ndarray, x_rms: float, args):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        y = signal.lfilter(b, a, x)
+    y_window = y[mask]
+    if y_window.size == 0 or not np.all(np.isfinite(y_window)):
+        return math.nan, math.nan, math.nan
+    y_rms = float(np.sqrt(np.mean(y_window ** 2.0)))
+    if y_rms <= 0.0 or not np.isfinite(y_rms):
+        return math.nan, math.nan, math.nan
+    ratio = y_rms / x_rms
+    rise_time_ms = first_rise_time_ms(
+        x,
+        y,
+        args.samplerate,
+        args.rise_time_threshold_db,
+        args.rise_time_window_ms,
+    )
+    return 20.0 * math.log10(ratio), ratio, rise_time_ms
+
+
 def db_to_amplitude_ratio(db_values):
     return np.power(10.0, np.asarray(db_values) / 20.0)
 
@@ -528,6 +616,7 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
     stop_gaps = build_stop_gaps(args)
     gpass_values = parse_float_list(args.gpass_values)
     gstop_values = parse_float_list(args.gstop_values)
+    time_response_x, time_response_mask, time_response_x_rms = build_time_response_input(args)
     total = len(families) * len(pass_edges) * len(stop_gaps) * len(gpass_values) * len(gstop_values)
     progress_unit = max(total // 100, 1)
     candidates: list[FilterCandidate] = []
@@ -642,6 +731,24 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
                             if near_delay_ms > args.max_target_delay_ms:
                                 continue
 
+                        time_response_gain_db, time_response_ratio, rise_time_ms = causal_time_response_metrics(
+                            signal,
+                            b,
+                            a,
+                            time_response_x,
+                            time_response_mask,
+                            time_response_x_rms,
+                            args,
+                        )
+                        if not np.isfinite(time_response_gain_db) or not np.isfinite(time_response_ratio):
+                            continue
+                        if (
+                            not args.no_time_response_gain_check
+                            and args.min_time_response_gain_db is not None
+                            and time_response_gain_db < args.min_time_response_gain_db
+                        ):
+                            continue
+
                         candidates.append(
                             FilterCandidate(
                                 family=family,
@@ -661,6 +768,10 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
                                 target_delay_ms=delay_ms,
                                 near_target_max_delay_ms=near_delay_ms,
                                 near_target_delay_peak_freq_hz=near_delay_peak_freq,
+                                time_response_gain_db=time_response_gain_db,
+                                time_response_ratio=time_response_ratio,
+                                time_response_rise_time_ms=rise_time_ms,
+                                time_response_rise_threshold_db=float(args.rise_time_threshold_db),
                                 max_pole_abs=max_pole_abs,
                                 frequencies=frequencies,
                                 response_db=db_values,
@@ -673,6 +784,8 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
     candidates.sort(
         key=lambda item: (
             item.q_value,
+            item.time_response_gain_db,
+            -(item.time_response_rise_time_ms if np.isfinite(item.time_response_rise_time_ms) else float("inf")),
             -item.near_target_max_delay_ms,
             -abs(item.target_delay_ms),
             -item.direct_form_order,
@@ -705,11 +818,28 @@ def format_tuple(values: Iterable[float], indent: str = "    ") -> str:
     return "(\n" + "\n".join(lines) + "\n)"
 
 
+def print_rank_coefficients(candidates: list[FilterCandidate], max_ranks: int = DEFAULT_COEFFICIENT_RANKS):
+    rank_count = min(max_ranks, len(candidates))
+    print(f"Rank 1-{rank_count} の係数:")
+    for rank, candidate in enumerate(candidates[:rank_count], start=1):
+        print(
+            f"# Rank {rank}: family={candidate.family}, "
+            f"Q={candidate.q_value:.2f}, "
+            f"bandwidth_3db={candidate.bandwidth_3db:.4f} Hz, "
+            f"time_response_gain={candidate.time_response_gain_db:.2f} dB"
+        )
+        print(f"RANK_{rank:02d}_BANDPASS_A = " + format_tuple(candidate.a))
+        print()
+        print(f"RANK_{rank:02d}_BANDPASS_B = " + format_tuple(candidate.b))
+        print()
+
+
 def print_candidates(candidates: list[FilterCandidate], target_freq: float):
     if not candidates:
         print(
             "条件に合うフィルタ候補なし. "
-            "探索範囲, gstop, max_q, max_pole_abs, max_direct_form_orderを緩める."
+            "探索範囲, gstop, max_q, max_pole_abs, max_direct_form_order, "
+            "min_time_response_gain_dbを緩める."
         )
         return
 
@@ -736,6 +866,22 @@ def print_candidates(candidates: list[FilterCandidate], target_freq: float):
             f"{candidate.near_target_max_delay_ms:.2f} ms "
             f"at {candidate.near_target_delay_peak_freq_hz:.4f} Hz"
         )
+        print(
+            "  time_response_gain: "
+            f"{candidate.time_response_gain_db:.2f} dB "
+            f"({candidate.time_response_ratio:.3f}x)"
+        )
+        if np.isfinite(candidate.time_response_rise_time_ms):
+            print(
+                "  rise_time: "
+                f"{candidate.time_response_rise_time_ms:.2f} ms "
+                f"to {candidate.time_response_rise_threshold_db:.2f} dB"
+            )
+        else:
+            print(
+                "  rise_time: "
+                f"not reached to {candidate.time_response_rise_threshold_db:.2f} dB"
+            )
         print(f"  max_pole_abs: {candidate.max_pole_abs:.8f}")
         print()
 
@@ -744,6 +890,8 @@ def print_candidates(candidates: list[FilterCandidate], target_freq: float):
     print("DEFAULT_BANDPASS_A = " + format_tuple(best.a))
     print()
     print("DEFAULT_BANDPASS_B = " + format_tuple(best.b))
+    print()
+    print_rank_coefficients(candidates)
 
 
 def save_candidates(path: Path, args: argparse.Namespace, candidates: list[FilterCandidate]):
@@ -773,6 +921,13 @@ def save_candidates(path: Path, args: argparse.Namespace, candidates: list[Filte
             "max_target_delay_ms": args.max_target_delay_ms,
             "target_delay_neighborhood_width": args.target_delay_neighborhood_width,
             "target_delay_neighborhood_points": args.target_delay_neighborhood_points,
+            "time_response_duration_ms": args.time_response_duration_ms,
+            "time_response_start_ms": args.time_response_start_ms,
+            "time_response_window_ms": args.time_response_window_ms,
+            "min_time_response_gain_db": args.min_time_response_gain_db,
+            "no_time_response_gain_check": args.no_time_response_gain_check,
+            "rise_time_threshold_db": args.rise_time_threshold_db,
+            "rise_time_window_ms": args.rise_time_window_ms,
             "max_pole_abs": args.max_pole_abs,
             "max_direct_form_order": args.max_direct_form_order,
             "show_response_legend": args.show_response_legend,
@@ -1344,6 +1499,34 @@ def apply_interactive_inputs(args: argparse.Namespace):
             "群遅延周辺確認の走査点数",
             args.target_delay_neighborhood_points,
         )
+        args.time_response_duration_ms = ask_float(
+            "短時間応答確認のシミュレーション時間[ms]",
+            args.time_response_duration_ms,
+        )
+        args.time_response_start_ms = ask_float(
+            "短時間応答確認の評価開始時刻[ms]",
+            args.time_response_start_ms,
+        )
+        args.time_response_window_ms = ask_float(
+            "短時間応答確認の評価窓[ms]",
+            args.time_response_window_ms,
+        )
+        args.min_time_response_gain_db = ask_float(
+            "短時間応答で許容する最小ゲイン[dB]",
+            args.min_time_response_gain_db,
+        )
+        args.rise_time_threshold_db = ask_float(
+            "立ち上がり時間の到達しきい値[dB]",
+            args.rise_time_threshold_db,
+        )
+        args.rise_time_window_ms = ask_float(
+            "立ち上がり時間のRMS窓長[ms]",
+            args.rise_time_window_ms,
+        )
+        args.no_time_response_gain_check = not ask_bool(
+            "短時間応答ゲインが低い候補を除外する",
+            not args.no_time_response_gain_check,
+        )
         args.max_pole_abs = ask_float("極の絶対値上限", args.max_pole_abs)
         args.max_direct_form_order = ask_int(
             "a,b直接形の最大次数, 0で制限なし",
@@ -1468,6 +1651,12 @@ def build_check_args(args: argparse.Namespace, save_figure: str | None = None, s
         str(args.target_freq),
         "--plot-max-freq",
         str(args.plot_max_freq),
+        "--duration-ms",
+        str(args.time_response_duration_ms),
+        "--settle-ms",
+        str(args.time_response_start_ms),
+        "--plot-window-ms",
+        str(args.time_response_window_ms),
         "--test-freqs",
         check_test_freqs,
         "--test-amps",
@@ -1530,6 +1719,10 @@ def draw_filter_details_overlay(
         mask_delay = (delay_freq <= check_args.plot_max_freq) & np.isfinite(delay_ms) & np.isfinite(delay_samples)
         gain_target_db = check_filter.nearest_value(frequencies, response_db, check_args.target_freq)
         delay_target_ms = abs(check_filter.nearest_value(delay_freq, delay_ms, check_args.target_freq))
+        time_input_rms = float(np.sqrt(np.mean(x[mask_time] ** 2.0))) if np.any(mask_time) else math.nan
+        time_output_rms = float(np.sqrt(np.mean(y[mask_time] ** 2.0))) if np.any(mask_time) else math.nan
+        time_gain_ratio = time_output_rms / time_input_rms if time_input_rms > 0 else math.nan
+        time_gain_db = 20.0 * math.log10(time_gain_ratio) if time_gain_ratio > 0 else math.nan
 
         ax_response.plot(
             frequencies[mask_freq],
@@ -1569,12 +1762,18 @@ def draw_filter_details_overlay(
             time_sec[mask_time] * 1000.0,
             y[mask_time],
             color=color,
-            label=f"Rank {rank} output",
+            label=(
+                f"Rank {rank} output ({time_gain_db:.1f} dB, "
+                f"rise={candidate.time_response_rise_time_ms:.0f} ms)"
+            ),
         )
         stable_text = "stable" if is_stable else "unstable"
         summaries.append(
             f"Rank {rank}: target gain={gain_target_db:.2f} dB, "
-            f"|delay|={delay_target_ms:.2f} ms, max |pole|={max_pole_abs:.8f}, {stable_text}"
+            f"|delay|={delay_target_ms:.2f} ms, "
+            f"time gain={time_gain_db:.2f} dB, "
+            f"rise={candidate.time_response_rise_time_ms:.2f} ms, "
+            f"max |pole|={max_pole_abs:.8f}, {stable_text}"
         )
 
     ax_response.axhline(-3.0, linestyle=":", linewidth=1.0, label="-3 dB")
@@ -1703,10 +1902,16 @@ def run_check_filters(candidates: list[FilterCandidate], args: argparse.Namespac
             str(args.samplerate),
             "--target-freq",
             str(args.target_freq),
-            "--plot-max-freq",
-            str(args.plot_max_freq),
-            "--test-freqs",
-            check_test_freqs,
+        "--plot-max-freq",
+        str(args.plot_max_freq),
+        "--duration-ms",
+        str(args.time_response_duration_ms),
+        "--settle-ms",
+        str(args.time_response_start_ms),
+        "--plot-window-ms",
+        str(args.time_response_window_ms),
+        "--test-freqs",
+        check_test_freqs,
             "--test-amps",
             check_test_amps,
         ]
@@ -1830,6 +2035,48 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TARGET_DELAY_NEIGHBORHOOD_POINTS,
         help="target周波数周辺の群遅延を走査する点数.",
     )
+    parser.add_argument(
+        "--time-response-duration-ms",
+        type=float,
+        default=DEFAULT_TIME_RESPONSE_DURATION_MS,
+        help="短時間応答確認のシミュレーション時間[ms].",
+    )
+    parser.add_argument(
+        "--time-response-start-ms",
+        "--time-response-settle-ms",
+        type=float,
+        default=DEFAULT_TIME_RESPONSE_START_MS,
+        help="短時間応答ゲインを評価する開始時刻[ms].",
+    )
+    parser.add_argument(
+        "--time-response-window-ms",
+        type=float,
+        default=DEFAULT_TIME_RESPONSE_WINDOW_MS,
+        help="短時間応答ゲインを評価する窓長[ms].",
+    )
+    parser.add_argument(
+        "--min-time-response-gain-db",
+        type=float,
+        default=DEFAULT_MIN_TIME_RESPONSE_GAIN_DB,
+        help="短時間の因果フィルタ出力で許容する最小ゲイン[dB].",
+    )
+    parser.add_argument(
+        "--rise-time-threshold-db",
+        type=float,
+        default=DEFAULT_RISE_TIME_THRESHOLD_DB,
+        help="立ち上がり時間として記録する到達しきい値[dB].",
+    )
+    parser.add_argument(
+        "--rise-time-window-ms",
+        type=float,
+        default=DEFAULT_RISE_TIME_WINDOW_MS,
+        help="立ち上がり時間を判定する移動RMS窓長[ms].",
+    )
+    parser.add_argument(
+        "--no-time-response-gain-check",
+        action="store_true",
+        help="短時間応答ゲインが低い候補の除外を行わない.",
+    )
     parser.add_argument("--max-pole-abs", type=float, default=DEFAULT_MAX_POLE_ABS)
     parser.add_argument(
         "--max-direct-form-order",
@@ -1935,6 +2182,16 @@ def validate_args(args: argparse.Namespace):
         raise ValueError("target_delay_neighborhood_width は0以上")
     if args.target_delay_neighborhood_points <= 0:
         raise ValueError("target_delay_neighborhood_points は正の整数")
+    if args.time_response_duration_ms <= 0:
+        raise ValueError("time_response_duration_ms は正の値")
+    if args.time_response_start_ms < 0:
+        raise ValueError("time_response_start_ms は0以上")
+    if args.time_response_window_ms <= 0:
+        raise ValueError("time_response_window_ms は正の値")
+    if args.time_response_start_ms >= args.time_response_duration_ms:
+        raise ValueError("time_response_start_ms は time_response_duration_ms より小さい必要あり")
+    if args.rise_time_window_ms <= 0:
+        raise ValueError("rise_time_window_ms は正の値")
     if args.max_direct_form_order <= 0:
         args.max_direct_form_order = None
     if args.detail_rank is not None:
