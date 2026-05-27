@@ -775,11 +775,20 @@ def save_candidates(path: Path, args: argparse.Namespace, candidates: list[Filte
             "target_delay_neighborhood_points": args.target_delay_neighborhood_points,
             "max_pole_abs": args.max_pole_abs,
             "max_direct_form_order": args.max_direct_form_order,
+            "show_response_legend": args.show_response_legend,
         },
         "candidates": [candidate.to_json_dict() for candidate in candidates],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def configure_response_legend(ax_response, show_legend: bool):
+    """周波数特性の凡例はチェックボックス用に作り, 既定では画面上では隠す."""
+    legend = ax_response.legend(loc="upper right", fontsize=8, framealpha=0.85)
+    if legend is not None and not show_legend:
+        legend.set_visible(False)
+    return legend
 
 
 def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Namespace, ax_response, ax_delay):
@@ -798,6 +807,8 @@ def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Na
 
         try:
             with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                warnings.filterwarnings("ignore", message=".*group delay is singular.*", category=UserWarning)
                 warnings.filterwarnings(
                     "ignore",
                     message=".*denominator is extremely small.*",
@@ -826,7 +837,7 @@ def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Na
     ax_response.set_ylabel("Gain [dB]")
     ax_response.set_xlim(0, args.plot_max_freq)
     ax_response.grid(True)
-    ax_response.legend(loc="best")
+    configure_response_legend(ax_response, args.show_response_legend)
     ratio_axis = ax_response.twinx()
     ratio_axis.set_ylabel("Amplitude ratio")
     sync_ratio_axis_to_db_axis(ax_response, ratio_axis)
@@ -865,7 +876,10 @@ def plot_candidates(candidates: list[FilterCandidate], args: argparse.Namespace)
         print(f"Figure saved: {save_path}")
 
     enable_rank_check_panel(fig, fig.axes)
-    plt.show(block=True)
+    if is_non_interactive_matplotlib_backend(plt.get_backend()):
+        plt.close(fig)
+    else:
+        plt.show(block=True)
 
 
 def is_non_interactive_matplotlib_backend(backend_name: str) -> bool:
@@ -1579,7 +1593,7 @@ def draw_filter_details_overlay(
     ax_response.set_ylabel("Gain [dB]")
     ax_response.set_xlim(0.0, check_args.plot_max_freq)
     ax_response.grid(True)
-    ax_response.legend(loc="best")
+    configure_response_legend(ax_response, args.show_response_legend)
     ratio_axis = ax_response.twinx()
     ratio_axis.set_ylabel("Amplitude ratio")
     check_filter.sync_ratio_axis_to_db_axis(ax_response, ratio_axis)
@@ -1829,6 +1843,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, help="候補と係数をJSON保存するパス.")
     parser.add_argument("--save-figure", help="周波数特性グラフを画像保存するパス.")
     parser.add_argument("--no-plot", action="store_true", help="グラフ表示を行わない.")
+    parser.add_argument(
+        "--show-response-legend",
+        action="store_true",
+        help="周波数特性グラフ内の凡例を表示する. 既定では重なり回避のため非表示.",
+    )
     parser.add_argument("--no-progress", dest="progress", action="store_false", help="進捗表示を行わない.")
     parser.add_argument("--interactive", action="store_true", help="対話入力で設定する. 指定しない場合はコマンド引数と既定値だけで実行.")
     parser.add_argument(

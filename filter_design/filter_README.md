@@ -583,6 +583,14 @@ python filter_design\design_peak_filter.py 10 --max-direct-form-order 8
 | Pole-zero plot | 極と零点. 極が単位円内にあるかを見る |
 | Time waveform | テスト信号を入れたときの出力波形を見る |
 
+周波数特性の凡例は, 線と重なって見にくくなるため既定では非表示.
+Rankごとの表示, 非表示は左側の `line` パネルで操作する.
+周波数特性内にも凡例を出したい場合:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --show-response-legend
+```
+
 `design_fir_bandpass_filter.py` では, `Pole-zero plot` の代わりに `FIR impulse response / taps` を表示する.
 FIRは `a=(1,)` の非再帰フィルタなので, IIRのような安定性確認用の極プロットより, タップ係数の対称性と一定群遅延を見る.
 
