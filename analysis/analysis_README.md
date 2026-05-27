@@ -2,9 +2,10 @@
 
 このフォルダには, 計測済みデータを解析するためのコードを置く.
 
-現在の主な解析コードは `FFT.py`.
-`measurement/measurement_data/<run folder>/serial_samples.csv` を読み込み,
-チャンネルごとに線色を変えて, 時系列波形とFFTグラフを表示する.
+現在の主な解析コードは `FFT.py`, `Wavelet.py`, `PhaseTiming.py`,
+`PhaseTiming_ch1_minus_ch2.py`.
+`measurement/measurement_data/<run folder>/serial_samples.csv` などを読み込み,
+チャンネルごとの周波数成分, 時間-周波数変化, 刺激周期に対する位相を確認する.
 
 ## ファイル説明
 
@@ -14,6 +15,7 @@
 | [FFT.py](FFT.py) | チャンネル別の波形表示とFFT解析 |
 | [Wavelet.py](Wavelet.py) | チャンネル別の時間-周波数解析 |
 | [PhaseTiming.py](PhaseTiming.py) | 刺激周期ごとの位相タイミング確認 |
+| [PhaseTiming_ch1_minus_ch2.py](PhaseTiming_ch1_minus_ch2.py) | `ch1 - ch2` の差分信号で位相タイミング確認 |
 
 ## 目次
 
@@ -68,7 +70,8 @@ metadata.json
 | `parse_error` | エラー行の除外 |
 
 `metadata.json` がある場合, 刺激周波数を読み取り,
-FFTグラフに目標周波数の縦線を表示する.
+FFTやWaveletのターゲット周波数計算に使う.
+FFTグラフでは見やすさを優先し, 目的周波数の縦点線は表示しない.
 
 ## 基本実行
 
@@ -98,13 +101,14 @@ python analysis\FFT.py C:\Users\g2110\Documents\EEG\26_EEG\measurement\measureme
 | 場所 | 内容 |
 |---|---|
 | 左側 | チャンネル別の時系列波形 |
-| 右側 | チャンネル別のFFT結果 |
+| 右側 | チャンネル別のFFT結果. 全チャンネル最大を1.0にした相対振幅 |
 | 色付きの線 | `ch1`, `ch2`, `ch3` の各チャンネル |
 | 色付きの丸印 | 各チャンネルのピーク周波数 |
-| 赤い点線 | 刺激周波数, または `--target-freq` で指定した周波数 |
+| 左側のShowボタン | チャンネル線の表示/非表示を切り替える |
 
 実行時のコンソールにも, チャンネルごとのサンプル数,
-推定サンプリング周波数, ピーク周波数, 振幅が出力される.
+推定サンプリング周波数, ピーク周波数, 絶対振幅, 相対振幅が出力される.
+相対振幅は, 選択された全チャンネルのFFT振幅最大値を `1.0` とする.
 
 ## 解析区間の指定
 
@@ -129,6 +133,19 @@ fixation_before
 stimulus
 fixation_after
 finished
+```
+
+さらに, phaseで抽出したデータの中から秒数範囲を指定できる.
+既定では `--time-range` の0秒は「選択されたデータの先頭」.
+
+```powershell
+python analysis\FFT.py max2_parallel_20260520_185539 --phase stimulus --time-range 0,3
+```
+
+実験全体の `experiment_time_s` を基準にしたい場合:
+
+```powershell
+python analysis\FFT.py max2_parallel_20260520_185539 --time-origin experiment --time-range 10,13
 ```
 
 ## チャンネル指定
@@ -167,7 +184,10 @@ python analysis\FFT.py max2_parallel_20260520_185539 --min-freq 2 --max-freq 60
 python analysis\FFT.py max2_parallel_20260520_185539 --target-freq 10
 ```
 
-目標周波数の縦線を表示しない:
+目標周波数はコンソールの `target_amplitude` と `target_relative_amplitude` の計算に使う.
+FFTグラフには目的周波数の縦点線を表示しない.
+
+目標周波数計算自体を使わない:
 
 ```powershell
 python analysis\FFT.py max2_parallel_20260520_185539 --no-target-marker
@@ -208,11 +228,13 @@ FFT.py は以下の順で処理する.
 3. `parse_error` がある行を除外
 4. 指定した `phase_name` の行だけを抽出
 5. チャンネルごとに時系列データを作成
-6. `experiment_time_s` からサンプリング周波数を推定
-7. 不等間隔サンプルを等間隔に補間
-8. 平均値を引いてHanning窓をかける
-9. `numpy.fft.rfft` でFFT
-10. チャンネルごとに色分けして波形とFFTを重ねて表示
+6. `--time-range` が指定されていれば時間範囲で切り出す
+7. `experiment_time_s` からサンプリング周波数を推定
+8. 不等間隔サンプルを等間隔に補間
+9. 平均値を引いてHanning窓をかける
+10. `numpy.fft.rfft` でFFT
+11. 全チャンネルの最大FFT振幅を基準に相対振幅化
+12. チャンネルごとに色分けして波形とFFTを重ねて表示
 
 ## よくある実行例
 
@@ -220,6 +242,12 @@ FFT.py は以下の順で処理する.
 
 ```powershell
 python analysis\FFT.py max2_parallel_20260520_185539 --phase stimulus --min-freq 2 --max-freq 60
+```
+
+刺激区間の最初の3秒だけを確認:
+
+```powershell
+python analysis\FFT.py max2_parallel_20260520_185539 --phase stimulus --time-range 0,3
 ```
 
 10 Hz 付近を見たい場合:
@@ -253,7 +281,7 @@ python analysis\Wavelet.py C:\Users\g2110\Documents\EEG\26_EEG\measurement\measu
 ```
 
 既定では `all` で計測データ全体を解析し,
-Morletウェーブレットで 2-60 Hz を見る.
+Morletウェーブレットで 2-45 Hz を見る.
 
 グラフの構成:
 
@@ -264,6 +292,13 @@ Morletウェーブレットで 2-60 Hz を見る.
 | 赤い点線 | 刺激周波数, または `--target-freq` で指定した周波数 |
 | 白い丸印 | 各チャンネルの最大パワー位置 |
 
+カラーマップは既定で虹色系の `turbo`.
+色の基準は既定で `relative`.
+これは選択された全チャンネルのWavelet powerをまとめて,
+5-95 percentile の範囲を `0-1` に正規化する表示.
+チャンネルごとではなく全チャンネル共通の相対基準なので,
+チャンネル間の強さも比較しやすい.
+
 よく使う指定:
 
 ```powershell
@@ -272,6 +307,10 @@ python analysis\Wavelet.py max2_parallel_20260520_185539 --channels ch1,ch2
 python analysis\Wavelet.py max2_parallel_20260520_185539 --freq-count 80
 python analysis\Wavelet.py max2_parallel_20260520_185539 --freq-scale log
 python analysis\Wavelet.py max2_parallel_20260520_185539 --target-freq 10
+python analysis\Wavelet.py max2_parallel_20260520_185539 --colormap turbo
+python analysis\Wavelet.py max2_parallel_20260520_185539 --power-scale relative
+python analysis\Wavelet.py max2_parallel_20260520_185539 --relative-vmin-percentile 1 --relative-vmax-percentile 99
+python analysis\Wavelet.py max2_parallel_20260520_185539 --notch on
 python analysis\Wavelet.py max2_parallel_20260520_185539 --save
 python analysis\Wavelet.py max2_parallel_20260520_185539 --no-show
 ```
@@ -288,7 +327,11 @@ python analysis\Wavelet.py max2_parallel_20260520_185539 --no-show
 | `--freq-scale` | `linear` または `log` |
 | `--wavelet-cycles` | Morletウェーブレットの周期数 |
 | `--edge-ignore-sec` | ピーク検出で無視する端の秒数 |
-| `--power-scale` | `db` または `linear` |
+| `--power-scale` | `relative`, `db`, `linear` |
+| `--relative-vmin-percentile` | 相対表示の下側percentile |
+| `--relative-vmax-percentile` | 相対表示の上側percentile |
+| `--colormap` | `turbo`, `jet`, `rainbow` などMatplotlib colormap名 |
+| `--notch` | `on` で既定IIRノッチをWavelet前に適用 |
 | `--save` | PNG保存 |
 | `--no-show` | グラフを表示せず計算だけ実行 |
 
@@ -354,8 +397,24 @@ python analysis\PhaseTiming.py max2_parallel_20260520_185539 --start-state on
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --start-state off
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --peak-mode abs
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --filter-delay-ms 12.5
+python analysis\PhaseTiming.py max2_parallel_20260520_185539 --notch on
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --save
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --no-show
+```
+
+`--notch on` を指定すると, `PhaseTiming.py` 冒頭の
+`DEFAULT_NOTCH_A`, `DEFAULT_NOTCH_B` を使ってIIRノッチをBPF前に適用する.
+既定はOFF.
+
+グラフの振幅軸は, 選択された全チャンネルの最大絶対振幅を基準に共通化する.
+コンソールには `Amplitude reference` として基準値を表示する.
+
+`ch1 - ch2` を1つの指標として見たい場合は `PhaseTiming_ch1_minus_ch2.py` を使う.
+
+```powershell
+python analysis\PhaseTiming_ch1_minus_ch2.py max2_parallel_20260520_185539
+python analysis\PhaseTiming_ch1_minus_ch2.py max2_parallel_20260520_185539 --notch on
+python analysis\PhaseTiming_ch1_minus_ch2.py max2_parallel_20260520_185539 --positive-channel ch1 --negative-channel ch2
 ```
 
 BPF係数:

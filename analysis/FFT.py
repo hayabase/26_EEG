@@ -107,6 +107,24 @@ def parse_channels(text: Optional[str]) -> Tuple[str, ...]:
     return channels
 
 
+def parse_time_range(text: Optional[str]) -> Optional[Tuple[float, float]]:
+    if text is None:
+        return None
+    parts = [part.strip() for part in text.replace(";", ",").split(",") if part.strip()]
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError("--time-range must be START,END in seconds")
+    try:
+        start_s = float(parts[0])
+        end_s = float(parts[1])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--time-range values must be numbers") from exc
+    if start_s < 0.0:
+        raise argparse.ArgumentTypeError("--time-range START must be 0 or greater")
+    if end_s <= start_s:
+        raise argparse.ArgumentTypeError("--time-range END must be greater than START")
+    return start_s, end_s
+
+
 def iter_valid_rows(serial_csv: Path, phase: str) -> Iterable[Dict[str, str]]:
     with open(serial_csv, newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
@@ -151,6 +169,32 @@ def load_channel_series(
                 np.asarray(values_by_channel[channel], dtype=float),
             )
     return series
+
+
+def crop_series_by_time_range(
+    series: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    time_range: Optional[Tuple[float, float]],
+    time_origin: str,
+) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    if time_range is None:
+        return series
+    if not series:
+        return series
+
+    start_s, end_s = time_range
+    if time_origin == "data":
+        origin_s = min(float(time_s[0]) for time_s, _value in series.values() if time_s.size)
+    else:
+        origin_s = 0.0
+
+    crop_start_s = origin_s + start_s
+    crop_end_s = origin_s + end_s
+    cropped: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+    for channel, (time_s, value) in series.items():
+        mask = (time_s >= crop_start_s) & (time_s <= crop_end_s)
+        if np.count_nonzero(mask) >= 2:
+            cropped[channel] = (time_s[mask], value[mask])
+    return cropped
 
 
 def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -268,10 +312,44 @@ def fft_amplitude_reference(
     return max_amplitude if max_amplitude > 0.0 else 1.0
 
 
+def enable_channel_check_panel(fig, channel_artists: dict[int, list], labels: list[str]) -> None:
+    try:
+        from matplotlib.widgets import CheckButtons
+    except Exception:
+        return
+
+    if not channel_artists:
+        return
+
+    fig.subplots_adjust(left=0.20, right=0.96, bottom=0.08, top=0.93, wspace=0.28)
+    panel_height = min(0.42, 0.045 * len(labels) + 0.08)
+    ax_box = fig.add_axes([0.015, 0.94 - panel_height, 0.16, panel_height])
+    buttons = CheckButtons(ax_box, labels, [True] * len(labels))
+    ax_box.set_title("Show", fontsize=9)
+
+    def on_clicked(label: str) -> None:
+        try:
+            index = labels.index(label)
+        except ValueError:
+            return
+        artists = channel_artists.get(index, [])
+        if not artists:
+            return
+        visible = not artists[0].get_visible()
+        for artist in artists:
+            artist.set_visible(visible)
+        fig.canvas.draw_idle()
+
+    buttons.on_clicked(on_clicked)
+    fig._channel_check_buttons = buttons
+
+
 def plot_fft(
     fft_results: Sequence[ChannelFft],
     run_dir: Path,
     phase: str,
+    time_range: Optional[Tuple[float, float]],
+    time_origin: str,
     min_freq_hz: float,
     max_freq_hz: float,
     save_path: Optional[Path],
@@ -286,16 +364,29 @@ def plot_fft(
         ) from exc
 
     fig, (time_ax, fft_ax) = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle(f"FFT: {run_dir.name} / phase={phase}")
+    time_label = ""
+    if time_range is not None:
+        time_label = f" / time={time_range[0]:.3f}-{time_range[1]:.3f} s ({time_origin})"
+    fig.suptitle(f"FFT: {run_dir.name} / phase={phase}{time_label}")
 
     start_time_s = min(float(result.time_s[0]) for result in fft_results)
     time_max_abs = max_abs_from_arrays(result.value for result in fft_results)
     amplitude_reference = fft_amplitude_reference(fft_results, min_freq_hz, max_freq_hz)
-    for result in fft_results:
+    channel_artists: dict[int, list] = {}
+    labels: List[str] = []
+    for result_index, result in enumerate(fft_results):
         color = CHANNEL_COLORS.get(result.name)
         time_axis = result.time_s - start_time_s
         time_label = f"{result.name}, fs={result.sample_rate_hz:.1f} Hz"
-        time_ax.plot(time_axis, result.value, linewidth=0.8, color=color, label=time_label)
+        artists = []
+        line_time, = time_ax.plot(
+            time_axis,
+            result.value,
+            linewidth=0.8,
+            color=color,
+            label=time_label,
+        )
+        artists.append(line_time)
 
         freq_mask = (result.frequency_hz >= min_freq_hz) & (result.frequency_hz <= max_freq_hz)
         relative_amplitude = result.amplitude / amplitude_reference
@@ -304,15 +395,16 @@ def plot_fft(
             f"{result.name}, peak={result.peak_frequency_hz:.3f} Hz, "
             f"rel={peak_relative_amplitude:.3f}"
         )
-        fft_ax.plot(
+        line_fft, = fft_ax.plot(
             result.frequency_hz[freq_mask],
             relative_amplitude[freq_mask],
             linewidth=1.0,
             color=color,
             label=fft_label,
         )
+        artists.append(line_fft)
         if np.isfinite(result.peak_frequency_hz):
-            fft_ax.scatter(
+            peak_artist = fft_ax.scatter(
                 [result.peak_frequency_hz],
                 [peak_relative_amplitude],
                 color=color,
@@ -320,19 +412,9 @@ def plot_fft(
                 s=24,
                 zorder=3,
             )
-
-    target_frequency_hz = next(
-        (result.target_frequency_hz for result in fft_results if result.target_frequency_hz is not None),
-        None,
-    )
-    if target_frequency_hz is not None:
-        fft_ax.axvline(
-            target_frequency_hz,
-            color="tab:red",
-            linestyle=":",
-            linewidth=1.3,
-            label=f"target={target_frequency_hz:.3f} Hz",
-        )
+            artists.append(peak_artist)
+        channel_artists[result_index] = artists
+        labels.append(result.name)
 
     time_ax.set_title("Waveform by channel")
     time_ax.set_xlabel("Time [s]")
@@ -348,7 +430,7 @@ def plot_fft(
     fft_ax.grid(True, alpha=0.3)
     fft_ax.legend(loc="best")
 
-    fig.tight_layout()
+    enable_channel_check_panel(fig, channel_artists, labels)
 
     if save_path is not None:
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,6 +472,22 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--min-freq", type=float, default=0.5, help="Minimum FFT frequency.")
     parser.add_argument("--max-freq", type=float, default=60.0, help="Maximum FFT frequency.")
     parser.add_argument(
+        "--time-range",
+        type=parse_time_range,
+        default=None,
+        help=(
+            "FFT time range in seconds as START,END. "
+            "Default origin is selected data start, so --phase stimulus --time-range 0,3 "
+            "uses the first 3 seconds of the stimulus data."
+        ),
+    )
+    parser.add_argument(
+        "--time-origin",
+        choices=("data", "experiment"),
+        default="data",
+        help="Origin for --time-range. data=start of selected data, experiment=experiment_time_s 0.",
+    )
+    parser.add_argument(
         "--target-freq",
         type=float,
         default=None,
@@ -427,8 +525,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             target_frequency_hz = read_target_frequency_hz(run_dir)
 
     series = load_channel_series(serial_csv, args.phase, args.channels)
+    series = crop_series_by_time_range(series, args.time_range, args.time_origin)
     if not series:
-        raise RuntimeError(f"No valid channel data found for phase={args.phase}")
+        raise RuntimeError(
+            f"No valid channel data found for phase={args.phase}, "
+            f"time_range={args.time_range}"
+        )
 
     fft_results = [
         compute_fft(channel, time_s, value, args.min_freq, args.max_freq, target_frequency_hz)
@@ -439,6 +541,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Run folder: {run_dir}")
     print(f"Serial CSV: {serial_csv}")
     print(f"Phase: {args.phase}")
+    if args.time_range is not None:
+        print(
+            f"FFT time range: {args.time_range[0]:.3f}-{args.time_range[1]:.3f} s "
+            f"(origin={args.time_origin})"
+        )
     if target_frequency_hz is not None:
         print(f"Target frequency marker: {target_frequency_hz:.3f} Hz")
     print(f"Amplitude reference: {amplitude_reference:.6g} (max across selected channels)")
@@ -471,6 +578,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fft_results=fft_results,
             run_dir=run_dir,
             phase=args.phase,
+            time_range=args.time_range,
+            time_origin=args.time_origin,
             min_freq_hz=args.min_freq,
             max_freq_hz=args.max_freq,
             save_path=save_path,
