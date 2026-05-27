@@ -83,6 +83,29 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--no-filter", action="store_true", help="Skip the bandpass filter.")
     parser.add_argument(
+        "--notch",
+        type=phase_timing.parse_on_off,
+        default=False,
+        metavar="{on,off}",
+        help="Apply the preset IIR notch filter before the bandpass filter.",
+    )
+    parser.add_argument(
+        "--notch-a",
+        type=lambda text: phase_timing.parse_coefficients(
+            text, phase_timing.DEFAULT_NOTCH_A
+        ),
+        default=np.asarray(phase_timing.DEFAULT_NOTCH_A, dtype=float),
+        help="Comma-separated IIR notch denominator coefficients.",
+    )
+    parser.add_argument(
+        "--notch-b",
+        type=lambda text: phase_timing.parse_coefficients(
+            text, phase_timing.DEFAULT_NOTCH_B
+        ),
+        default=np.asarray(phase_timing.DEFAULT_NOTCH_B, dtype=float),
+        help="Comma-separated IIR notch numerator coefficients.",
+    )
+    parser.add_argument(
         "--filter-delay-ms",
         type=float,
         default=phase_timing.DEFAULT_FILTER_DELAY_MS,
@@ -198,12 +221,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         a=args.filter_a,
         use_filter=not args.no_filter,
         filter_delay_ms=args.filter_delay_ms,
+        notch_b=args.notch_b,
+        notch_a=args.notch_a,
+        use_notch=args.notch,
     )
 
     folded_by_phase: Dict[str, List[phase_timing.FoldedPhase]] = {}
     metric_channel = channels.get(args.metric_name)
     if metric_channel is None:
         raise RuntimeError(f"Metric channel not built: {args.metric_name}")
+    amplitude_reference = phase_timing.max_abs_from_arrays([metric_channel.filtered])
 
     for phase in phase_intervals:
         folded = phase_timing.fold_phase_channel(
@@ -227,6 +254,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Frequency: {frequency_hz:.6f} Hz, period={1000.0 / frequency_hz:.3f} ms")
     print(f"Phase zero: {phase_timing.phase_zero_label(start_on)}")
     print(f"Bandpass filter: {'OFF' if args.no_filter else 'ON'}")
+    print(f"Notch filter: {'ON' if args.notch else 'OFF'}")
+    if amplitude_reference is not None:
+        print(f"Amplitude reference: {amplitude_reference:.6g} (max abs across selected channels)")
     print(f"Filter delay correction: {args.filter_delay_ms:.3f} ms")
 
     for phase in phase_intervals:

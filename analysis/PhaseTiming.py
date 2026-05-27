@@ -35,6 +35,20 @@ DEFAULT_BANDPASS_B = (
     -0.0783414904343748275,
     0.00982032454691744716,
 )  # IIR分子係数b. DEFAULT_BANDPASS_Aと同じ設計の係数.
+
+# IIRノッチ係数. design_iir_notch_filter.py で作成した値をここへ入れる.
+# Rank 1: method=iirnotch, Q=100
+DEFAULT_NOTCH_A = (
+    1,
+    -1.89912988389104265,
+    0.996863331833437893,
+)  # IIRノッチ分母係数a. 既定値は50Hz, Q=100.
+DEFAULT_NOTCH_B = (
+    0.998431665916718947,
+    -1.89912988389104265,
+    0.998431665916718947,
+)  # IIRノッチ分子係数b. DEFAULT_NOTCH_Aと同じ設計の係数.
+
 DEFAULT_CHANNELS = ("ch1", "ch2", "ch3")  # 解析する既定チャンネル.
 DEFAULT_PHASES = ("fixation_before", "stimulus", "fixation_after")  # グラフ化する既定フェイズ.
 DEFAULT_PEAK_MODE = "max"  # 各周期内のピーク検出方法. max, min, abs.
@@ -200,6 +214,15 @@ def parse_coefficients(text: Optional[str], default: Sequence[float]) -> np.ndar
     if not values:
         raise argparse.ArgumentTypeError("filter coefficients cannot be empty")
     return np.asarray(values, dtype=float)
+
+
+def parse_on_off(text: str) -> bool:
+    normalized = text.strip().lower()
+    if normalized in ("on", "true", "1", "yes", "y"):
+        return True
+    if normalized in ("off", "false", "0", "no", "n"):
+        return False
+    raise argparse.ArgumentTypeError("use on/off")
 
 
 def read_event_phase_intervals(events_csv: Path, phases: Sequence[str]) -> List[PhaseInterval]:
@@ -426,8 +449,9 @@ def apply_iir_filter(signal: np.ndarray, b: np.ndarray, a: np.ndarray) -> np.nda
     if a[0] == 0.0:
         raise ValueError("filter coefficient a[0] cannot be 0")
 
-    a = a / a[0]
-    b = b / a[0]
+    a0 = float(a[0])
+    a = a / a0
+    b = b / a0
     output = np.zeros_like(signal, dtype=float)
 
     for index in range(signal.size):
@@ -450,15 +474,23 @@ def build_uniform_channels(
     a: np.ndarray,
     use_filter: bool,
     filter_delay_ms: float,
+    notch_b: Optional[np.ndarray] = None,
+    notch_a: Optional[np.ndarray] = None,
+    use_notch: bool = False,
 ) -> Dict[str, UniformChannel]:
     uniform_channels: Dict[str, UniformChannel] = {}
     for channel, (time_s, value) in series.items():
         uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value)
         centered_value = uniform_value - float(np.mean(uniform_value))
+        processed_value = centered_value
+        if use_notch:
+            if notch_a is None or notch_b is None:
+                raise ValueError("notch coefficients are required when notch is on")
+            processed_value = apply_iir_filter(processed_value, b=notch_b, a=notch_a)
         if use_filter:
-            filtered = apply_iir_filter(centered_value, b=b, a=a)
+            filtered = apply_iir_filter(processed_value, b=b, a=a)
         else:
-            filtered = centered_value
+            filtered = processed_value
         if filter_delay_ms != 0.0:
             delay_s = filter_delay_ms / 1000.0
             filtered = np.interp(uniform_time_s + delay_s, uniform_time_s, filtered)
@@ -550,6 +582,28 @@ def phase_zero_label(start_on: Optional[bool]) -> str:
     return "phase 0 ms = phase start"
 
 
+def max_abs_from_arrays(arrays: Iterable[np.ndarray]) -> Optional[float]:
+    max_value = 0.0
+    found = False
+    for values in arrays:
+        finite_values = np.asarray(values, dtype=float)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size == 0:
+            continue
+        max_value = max(max_value, float(np.max(np.abs(finite_values))))
+        found = True
+    if not found or max_value <= 0.0:
+        return None
+    return max_value
+
+
+def set_symmetric_ylim_from_max(axis, max_abs_value: Optional[float]) -> None:
+    if max_abs_value is None:
+        return
+    limit = max_abs_value * 1.05
+    axis.set_ylim(-limit, limit)
+
+
 def plot_bandpass_overview(
     channels: Sequence[UniformChannel],
     phase_intervals: Sequence[PhaseInterval],
@@ -566,8 +620,9 @@ def plot_bandpass_overview(
         ) from exc
 
     fig, ax = plt.subplots(figsize=(13, 5))
-    fig.suptitle(f"Bandpass filtered signal: {run_dir.name}")
+    fig.suptitle(f"Filtered signal: {run_dir.name}")
     start_time_s = min(float(channel.time_s[0]) for channel in channels)
+    channel_max_abs = max_abs_from_arrays(channel.filtered for channel in channels)
     for channel in channels:
         color = CHANNEL_COLORS.get(channel.name)
         ax.plot(
@@ -584,6 +639,7 @@ def plot_bandpass_overview(
         ax.axvspan(phase_start, phase_end, alpha=0.05, label=phase.name)
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Filtered value")
+    set_symmetric_ylim_from_max(ax, channel_max_abs)
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
     fig.tight_layout()
@@ -621,6 +677,11 @@ def plot_phase_folded(
     for phase_name, folded_list in folded_by_phase.items():
         if not folded_list:
             continue
+        phase_max_abs = max_abs_from_arrays(
+            array
+            for folded in folded_list
+            for array in (folded.segments, folded.average_segment)
+        )
 
         row_count = len(folded_list)
         fig, axes = plt.subplots(
@@ -669,6 +730,7 @@ def plot_phase_folded(
             waveform_ax.set_xlabel("Phase time [ms]")
             waveform_ax.set_ylabel("Filtered value")
             waveform_ax.set_xlim(0.0, period_ms)
+            set_symmetric_ylim_from_max(waveform_ax, phase_max_abs)
             waveform_ax.grid(True, alpha=0.3)
             waveform_ax.legend(loc="best")
 
@@ -747,6 +809,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--no-filter", action="store_true", help="Skip the bandpass filter.")
     parser.add_argument(
+        "--notch",
+        type=parse_on_off,
+        default=False,
+        metavar="{on,off}",
+        help="Apply the preset IIR notch filter before the bandpass filter.",
+    )
+    parser.add_argument(
+        "--notch-a",
+        type=lambda text: parse_coefficients(text, DEFAULT_NOTCH_A),
+        default=np.asarray(DEFAULT_NOTCH_A, dtype=float),
+        help="Comma-separated IIR notch denominator coefficients.",
+    )
+    parser.add_argument(
+        "--notch-b",
+        type=lambda text: parse_coefficients(text, DEFAULT_NOTCH_B),
+        default=np.asarray(DEFAULT_NOTCH_B, dtype=float),
+        help="Comma-separated IIR notch numerator coefficients.",
+    )
+    parser.add_argument(
         "--filter-delay-ms",
         type=float,
         default=DEFAULT_FILTER_DELAY_MS,
@@ -819,7 +900,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         a=args.filter_a,
         use_filter=not args.no_filter,
         filter_delay_ms=args.filter_delay_ms,
+        notch_b=args.notch_b,
+        notch_a=args.notch_a,
+        use_notch=args.notch,
     )
+    amplitude_reference = max_abs_from_arrays(channel.filtered for channel in channels.values())
 
     folded_by_phase: Dict[str, List[FoldedPhase]] = {}
     for phase in phase_intervals:
@@ -845,6 +930,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Frequency: {frequency_hz:.6f} Hz, period={1000.0 / frequency_hz:.3f} ms")
     print(f"Phase zero: {phase_zero_label(start_on)}")
     print(f"Bandpass filter: {'OFF' if args.no_filter else 'ON'}")
+    print(f"Notch filter: {'ON' if args.notch else 'OFF'}")
+    if amplitude_reference is not None:
+        print(f"Amplitude reference: {amplitude_reference:.6g} (max abs across selected channels)")
     print(f"Filter delay correction: {args.filter_delay_ms:.3f} ms")
     for phase in phase_intervals:
         print(

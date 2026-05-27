@@ -11,6 +11,24 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 
+# ===== 初期値設定 =====
+# IIRノッチ係数. design_iir_notch_filter.py で作成した値をここへ入れる.
+# Rank 1: method=iirnotch, Q=100
+DEFAULT_NOTCH_A = (
+    1,
+    -1.89912988389104265,
+    0.996863331833437893,
+)  # IIRノッチ分母係数a. 既定値は50Hz, Q=100.
+DEFAULT_NOTCH_B = (
+    0.998431665916718947,
+    -1.89912988389104265,
+    0.998431665916718947,
+)  # IIRノッチ分子係数b. DEFAULT_NOTCH_Aと同じ設計の係数.
+DEFAULT_COLORMAP = "turbo"  # スカログラムの色. 虹色系で差が見やすい.
+DEFAULT_POWER_SCALE = "relative"  # 外れ値に寄りにくい相対表示を既定にする.
+DEFAULT_RELATIVE_VMIN_PERCENTILE = 5.0
+DEFAULT_RELATIVE_VMAX_PERCENTILE = 95.0
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_ROOTS = (
     REPO_ROOT / "measurement" / "measurement_data",
@@ -108,6 +126,28 @@ def parse_channels(text: Optional[str]) -> Tuple[str, ...]:
     return channels
 
 
+def parse_coefficients(text: Optional[str], default: Sequence[float]) -> np.ndarray:
+    if text is None:
+        return np.asarray(default, dtype=float)
+
+    try:
+        values = [float(part.strip()) for part in text.split(",") if part.strip()]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("filter coefficients must be comma-separated numbers") from exc
+    if not values:
+        raise argparse.ArgumentTypeError("filter coefficients cannot be empty")
+    return np.asarray(values, dtype=float)
+
+
+def parse_on_off(text: str) -> bool:
+    normalized = text.strip().lower()
+    if normalized in ("on", "true", "1", "yes", "y"):
+        return True
+    if normalized in ("off", "false", "0", "no", "n"):
+        return False
+    raise argparse.ArgumentTypeError("use on/off")
+
+
 def iter_valid_rows(serial_csv: Path, phase: str) -> Iterable[Dict[str, str]]:
     with open(serial_csv, newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
@@ -179,6 +219,31 @@ def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndar
     return uniform_time_s, uniform_value, sample_rate_hz
 
 
+def apply_iir_filter(signal: np.ndarray, b: np.ndarray, a: np.ndarray) -> np.ndarray:
+    if a.size == 0 or b.size == 0:
+        raise ValueError("filter coefficients cannot be empty")
+    if a[0] == 0.0:
+        raise ValueError("filter coefficient a[0] cannot be 0")
+
+    a0 = float(a[0])
+    a = a / a0
+    b = b / a0
+    output = np.zeros_like(signal, dtype=float)
+
+    for index in range(signal.size):
+        acc = 0.0
+        for b_index, b_value in enumerate(b):
+            source_index = index - b_index
+            if source_index >= 0:
+                acc += b_value * signal[source_index]
+        for a_index in range(1, a.size):
+            source_index = index - a_index
+            if source_index >= 0:
+                acc -= a[a_index] * output[source_index]
+        output[index] = acc
+    return output
+
+
 def build_frequencies(min_freq_hz: float, max_freq_hz: float, count: int, scale: str) -> np.ndarray:
     if scale == "log":
         return np.geomspace(min_freq_hz, max_freq_hz, count)
@@ -227,15 +292,22 @@ def compute_wavelet(
     support_sigma: float,
     edge_ignore_sec: float,
     target_frequency_hz: Optional[float],
+    notch_b: np.ndarray,
+    notch_a: np.ndarray,
+    use_notch: bool,
 ) -> ChannelWavelet:
     uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value)
     centered_value = uniform_value - float(np.mean(uniform_value))
-    power = np.empty((frequencies_hz.size, centered_value.size), dtype=float)
+    analysis_value = centered_value
+    if use_notch:
+        analysis_value = apply_iir_filter(analysis_value, b=notch_b, a=notch_a)
+    display_value = analysis_value if use_notch else uniform_value
+    power = np.empty((frequencies_hz.size, analysis_value.size), dtype=float)
 
     for freq_index, frequency_hz in enumerate(frequencies_hz):
         wavelet = morlet_wavelet(frequency_hz, sample_rate_hz, cycles, support_sigma)
         kernel = np.conj(wavelet[::-1])
-        coefficients = fft_convolve_same(centered_value, kernel)
+        coefficients = fft_convolve_same(analysis_value, kernel)
         power[freq_index] = np.abs(coefficients) ** 2.0
 
     search_power = power.copy()
@@ -264,7 +336,7 @@ def compute_wavelet(
     return ChannelWavelet(
         name=channel,
         time_s=uniform_time_s,
-        value=uniform_value,
+        value=display_value,
         sample_rate_hz=sample_rate_hz,
         frequency_hz=frequencies_hz,
         power=power,
@@ -276,7 +348,39 @@ def compute_wavelet(
     )
 
 
-def scale_power_for_plot(power: np.ndarray, power_scale: str) -> Tuple[np.ndarray, str]:
+def scale_power_for_plot(
+    power: np.ndarray,
+    power_scale: str,
+    relative_vmin_percentile: float,
+    relative_vmax_percentile: float,
+    relative_limits: Optional[Tuple[float, float]] = None,
+) -> Tuple[np.ndarray, str]:
+    if power_scale == "relative":
+        if relative_limits is None:
+            finite_power = power[np.isfinite(power)]
+            if finite_power.size == 0:
+                return np.zeros_like(power, dtype=float), "Relative power [0-1]"
+            vmin = float(np.percentile(finite_power, relative_vmin_percentile))
+            vmax = float(np.percentile(finite_power, relative_vmax_percentile))
+        else:
+            vmin, vmax = relative_limits
+
+        if vmax <= vmin:
+            finite_power = power[np.isfinite(power)]
+            if finite_power.size == 0:
+                return np.zeros_like(power, dtype=float), "Relative power [0-1]"
+            vmin = float(np.min(finite_power))
+            vmax = float(np.max(finite_power))
+        if vmax <= vmin:
+            return np.zeros_like(power, dtype=float), "Relative power [0-1 across channels]"
+
+        relative_power = (np.clip(power, vmin, vmax) - vmin) / (vmax - vmin)
+        label = (
+            "Relative power [0-1 across channels] "
+            f"(p{relative_vmin_percentile:g}-p{relative_vmax_percentile:g})"
+        )
+        return relative_power, label
+
     if power_scale == "linear":
         return power, "Power"
 
@@ -285,6 +389,28 @@ def scale_power_for_plot(power: np.ndarray, power_scale: str) -> Tuple[np.ndarra
         reference = 1.0
     power_db = 10.0 * np.log10((power / reference) + 1e-12)
     return power_db, "Power [dB re channel max]"
+
+
+def compute_relative_power_limits(
+    wavelet_results: Sequence[ChannelWavelet],
+    vmin_percentile: float,
+    vmax_percentile: float,
+) -> Optional[Tuple[float, float]]:
+    finite_arrays = [
+        result.power[np.isfinite(result.power)]
+        for result in wavelet_results
+        if np.any(np.isfinite(result.power))
+    ]
+    if not finite_arrays:
+        return None
+
+    all_power = np.concatenate(finite_arrays)
+    vmin = float(np.percentile(all_power, vmin_percentile))
+    vmax = float(np.percentile(all_power, vmax_percentile))
+    if vmax <= vmin:
+        vmin = float(np.min(all_power))
+        vmax = float(np.max(all_power))
+    return vmin, vmax
 
 
 def make_edges(values: np.ndarray) -> np.ndarray:
@@ -304,6 +430,9 @@ def plot_wavelet(
     run_dir: Path,
     phase: str,
     power_scale: str,
+    colormap: str,
+    relative_vmin_percentile: float,
+    relative_vmax_percentile: float,
     save_path: Optional[Path],
     show: bool,
 ) -> None:
@@ -352,15 +481,28 @@ def plot_wavelet(
         ),
         None,
     )
+    relative_limits = None
+    if power_scale == "relative":
+        relative_limits = compute_relative_power_limits(
+            wavelet_results,
+            relative_vmin_percentile,
+            relative_vmax_percentile,
+        )
 
     for axis, result in zip(axes[1:], wavelet_results):
-        plot_power, colorbar_label = scale_power_for_plot(result.power, power_scale)
+        plot_power, colorbar_label = scale_power_for_plot(
+            result.power,
+            power_scale,
+            relative_vmin_percentile,
+            relative_vmax_percentile,
+            relative_limits=relative_limits,
+        )
         time_axis = result.time_s - start_time_s
         image = axis.pcolormesh(
             make_edges(time_axis),
             make_edges(result.frequency_hz),
             plot_power,
-            cmap="viridis",
+            cmap=colormap,
             shading="auto",
         )
         if target_frequency_hz is not None:
@@ -453,15 +595,51 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--power-scale",
-        choices=("db", "linear"),
-        default="db",
-        help="Scalogram color scale.",
+        choices=("relative", "db", "linear"),
+        default=DEFAULT_POWER_SCALE,
+        help="Scalogram color scale. relative spreads each channel by percentile range.",
+    )
+    parser.add_argument(
+        "--relative-vmin-percentile",
+        type=float,
+        default=DEFAULT_RELATIVE_VMIN_PERCENTILE,
+        help="Lower percentile for --power-scale relative.",
+    )
+    parser.add_argument(
+        "--relative-vmax-percentile",
+        type=float,
+        default=DEFAULT_RELATIVE_VMAX_PERCENTILE,
+        help="Upper percentile for --power-scale relative.",
+    )
+    parser.add_argument(
+        "--colormap",
+        default=DEFAULT_COLORMAP,
+        help="Matplotlib colormap for the scalogram. Default is turbo.",
     )
     parser.add_argument(
         "--target-freq",
         type=float,
         default=None,
         help="Target marker frequency. If omitted, use metadata.json when available.",
+    )
+    parser.add_argument(
+        "--notch",
+        type=parse_on_off,
+        default=False,
+        metavar="{on,off}",
+        help="Apply the preset IIR notch filter before wavelet transform.",
+    )
+    parser.add_argument(
+        "--notch-a",
+        type=lambda text: parse_coefficients(text, DEFAULT_NOTCH_A),
+        default=np.asarray(DEFAULT_NOTCH_A, dtype=float),
+        help="Comma-separated IIR notch denominator coefficients.",
+    )
+    parser.add_argument(
+        "--notch-b",
+        type=lambda text: parse_coefficients(text, DEFAULT_NOTCH_B),
+        default=np.asarray(DEFAULT_NOTCH_B, dtype=float),
+        help="Comma-separated IIR notch numerator coefficients.",
     )
     parser.add_argument(
         "--no-target-marker",
@@ -493,6 +671,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("--support-sigma must be greater than 0")
     if args.edge_ignore_sec < 0.0:
         raise ValueError("--edge-ignore-sec must be 0 or greater")
+    if not (0.0 <= args.relative_vmin_percentile < args.relative_vmax_percentile <= 100.0):
+        raise ValueError(
+            "--relative-vmin-percentile and --relative-vmax-percentile must satisfy "
+            "0 <= vmin < vmax <= 100"
+        )
 
     run_dir = resolve_run_dir(args.data_path)
     serial_csv = find_serial_csv(run_dir)
@@ -522,6 +705,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             support_sigma=args.support_sigma,
             edge_ignore_sec=args.edge_ignore_sec,
             target_frequency_hz=target_frequency_hz,
+            notch_b=args.notch_b,
+            notch_a=args.notch_a,
+            use_notch=args.notch,
         )
         for channel, (time_s, value) in series.items()
     ]
@@ -532,10 +718,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(
         f"Wavelet: Morlet, cycles={args.wavelet_cycles:.2f}, "
         f"frequencies={args.min_freq:.3f}-{args.max_freq:.3f} Hz ({args.freq_count}), "
-        f"edge_ignore={args.edge_ignore_sec:.3f} s"
+        f"edge_ignore={args.edge_ignore_sec:.3f} s, "
+        f"power_scale={args.power_scale}, colormap={args.colormap}"
     )
     if target_frequency_hz is not None:
         print(f"Target frequency marker: {target_frequency_hz:.3f} Hz")
+    print(f"Notch filter: {'ON' if args.notch else 'OFF'}")
     for result in wavelet_results:
         line = (
             f"{result.name}: samples={result.value.size}, "
@@ -561,6 +749,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             run_dir=run_dir,
             phase=args.phase,
             power_scale=args.power_scale,
+            colormap=args.colormap,
+            relative_vmin_percentile=args.relative_vmin_percentile,
+            relative_vmax_percentile=args.relative_vmax_percentile,
             save_path=save_path,
             show=not args.no_show,
         )

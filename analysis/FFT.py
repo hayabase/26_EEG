@@ -228,6 +228,46 @@ def compute_fft(
     )
 
 
+def max_abs_from_arrays(arrays: Iterable[np.ndarray]) -> Optional[float]:
+    max_value = 0.0
+    found = False
+    for values in arrays:
+        finite_values = np.asarray(values, dtype=float)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size == 0:
+            continue
+        max_value = max(max_value, float(np.max(np.abs(finite_values))))
+        found = True
+    if not found or max_value <= 0.0:
+        return None
+    return max_value
+
+
+def set_symmetric_ylim_from_max(axis, max_abs_value: Optional[float]) -> None:
+    if max_abs_value is None:
+        return
+    limit = max_abs_value * 1.05
+    axis.set_ylim(-limit, limit)
+
+
+def fft_amplitude_reference(
+    fft_results: Sequence[ChannelFft],
+    min_freq_hz: float,
+    max_freq_hz: float,
+) -> float:
+    max_amplitude = 0.0
+    for result in fft_results:
+        freq_mask = (result.frequency_hz >= min_freq_hz) & (result.frequency_hz <= max_freq_hz)
+        freq_mask &= result.frequency_hz > 0.0
+        if not np.any(freq_mask):
+            continue
+        finite_amplitude = result.amplitude[freq_mask]
+        finite_amplitude = finite_amplitude[np.isfinite(finite_amplitude)]
+        if finite_amplitude.size:
+            max_amplitude = max(max_amplitude, float(np.max(finite_amplitude)))
+    return max_amplitude if max_amplitude > 0.0 else 1.0
+
+
 def plot_fft(
     fft_results: Sequence[ChannelFft],
     run_dir: Path,
@@ -249,6 +289,8 @@ def plot_fft(
     fig.suptitle(f"FFT: {run_dir.name} / phase={phase}")
 
     start_time_s = min(float(result.time_s[0]) for result in fft_results)
+    time_max_abs = max_abs_from_arrays(result.value for result in fft_results)
+    amplitude_reference = fft_amplitude_reference(fft_results, min_freq_hz, max_freq_hz)
     for result in fft_results:
         color = CHANNEL_COLORS.get(result.name)
         time_axis = result.time_s - start_time_s
@@ -256,10 +298,15 @@ def plot_fft(
         time_ax.plot(time_axis, result.value, linewidth=0.8, color=color, label=time_label)
 
         freq_mask = (result.frequency_hz >= min_freq_hz) & (result.frequency_hz <= max_freq_hz)
-        fft_label = f"{result.name}, peak={result.peak_frequency_hz:.3f} Hz"
+        relative_amplitude = result.amplitude / amplitude_reference
+        peak_relative_amplitude = result.peak_amplitude / amplitude_reference
+        fft_label = (
+            f"{result.name}, peak={result.peak_frequency_hz:.3f} Hz, "
+            f"rel={peak_relative_amplitude:.3f}"
+        )
         fft_ax.plot(
             result.frequency_hz[freq_mask],
-            result.amplitude[freq_mask],
+            relative_amplitude[freq_mask],
             linewidth=1.0,
             color=color,
             label=fft_label,
@@ -267,7 +314,7 @@ def plot_fft(
         if np.isfinite(result.peak_frequency_hz):
             fft_ax.scatter(
                 [result.peak_frequency_hz],
-                [result.peak_amplitude],
+                [peak_relative_amplitude],
                 color=color,
                 marker="o",
                 s=24,
@@ -290,12 +337,14 @@ def plot_fft(
     time_ax.set_title("Waveform by channel")
     time_ax.set_xlabel("Time [s]")
     time_ax.set_ylabel("Value")
+    set_symmetric_ylim_from_max(time_ax, time_max_abs)
     time_ax.grid(True, alpha=0.3)
     time_ax.legend(loc="best")
 
     fft_ax.set_title("FFT by channel")
     fft_ax.set_xlabel("Frequency [Hz]")
-    fft_ax.set_ylabel("Amplitude")
+    fft_ax.set_ylabel("Relative amplitude [max across channels = 1]")
+    fft_ax.set_ylim(bottom=0.0)
     fft_ax.grid(True, alpha=0.3)
     fft_ax.legend(loc="best")
 
@@ -385,21 +434,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         compute_fft(channel, time_s, value, args.min_freq, args.max_freq, target_frequency_hz)
         for channel, (time_s, value) in series.items()
     ]
+    amplitude_reference = fft_amplitude_reference(fft_results, args.min_freq, args.max_freq)
 
     print(f"Run folder: {run_dir}")
     print(f"Serial CSV: {serial_csv}")
     print(f"Phase: {args.phase}")
     if target_frequency_hz is not None:
         print(f"Target frequency marker: {target_frequency_hz:.3f} Hz")
+    print(f"Amplitude reference: {amplitude_reference:.6g} (max across selected channels)")
     for result in fft_results:
+        relative_peak = result.peak_amplitude / amplitude_reference
         line = (
             f"{result.name}: samples={result.value.size}, "
             f"fs={result.sample_rate_hz:.2f} Hz, "
             f"peak={result.peak_frequency_hz:.3f} Hz, "
-            f"amplitude={result.peak_amplitude:.3f}"
+            f"amplitude={result.peak_amplitude:.3f}, "
+            f"relative_amplitude={relative_peak:.3f}"
         )
         if result.target_amplitude is not None:
-            line += f", target_amplitude={result.target_amplitude:.3f}"
+            relative_target = result.target_amplitude / amplitude_reference
+            line += (
+                f", target_amplitude={result.target_amplitude:.3f}, "
+                f"target_relative_amplitude={relative_target:.3f}"
+            )
         print(line)
 
     if args.save is None:
