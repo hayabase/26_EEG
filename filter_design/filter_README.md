@@ -11,6 +11,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 | [filter_README.md](filter_README.md) | フィルタ設計コード全体の説明 |
 | [design_peak_filter.py](design_peak_filter.py) | target周波数を強調するIIRピーク/BPF候補を探索 |
 | [design_bandpass_filter.py](design_bandpass_filter.py) | 通過域, 遷移域を直接指定してIIR BPFを設計 |
+| [design_fir_bandpass_filter.py](design_fir_bandpass_filter.py) | 通過域, 遷移域を直接指定してFIR BPFを設計 |
 | [check_filter.py](check_filter.py) | 作成済み係数の周波数特性, 群遅延, 極配置を確認 |
 | `_tmp_auto_check.txt` | 自動確認時の一時出力, 必要なければ削除可能 |
 
@@ -19,6 +20,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 - [使う前の準備](#使う前の準備)
 - [design_peak_filter.py](#design_peak_filterpy)
 - [design_bandpass_filter.py](#design_bandpass_filterpy)
+- [design_fir_bandpass_filter.py](#design_fir_bandpass_filterpy)
 - [探索条件](#探索条件)
 - [グラフの見方](#グラフの見方)
 - [コンソール出力の見方](#コンソール出力の見方)
@@ -248,6 +250,119 @@ JSONは `check_filter.py` で確認できる:
 python filter_design\check_filter.py --json filter_design\bpf_10hz.json --rank 1
 ```
 
+## design_fir_bandpass_filter.py
+
+### 目的
+
+通過域と遷移域を直接決めて, FIRのBPFを作る.
+IIR版と同じく `9.5-10.5 Hzを通過域, その外側3 Hzを遷移域` のように指定する.
+
+FIR版では分母係数は常に `a = (1,)` になる.
+IIRのような再帰極はないため, 極の安定性や `max_pole_abs` は評価しない.
+代わりに以下を見る.
+
+- `numtaps`: FIRタップ数
+- `order`: `numtaps - 1`
+- `constant group delay`: 線形位相FIRの一定群遅延
+- `symmetry_error`: 係数が左右対称か
+- `linear_phase`: 線形位相か
+- `meets_spec`: 通過域/阻止域仕様を満たすか
+
+グラフ表示は, 周波数特性, 一定群遅延, FIRタップ係数, 時間波形を1枚で表示する.
+IIR版の極配置グラフはFIR版ではタップ係数グラフに置き換えている.
+
+### 基本実行
+
+対話入力で実行:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py
+```
+
+通過域と遷移域を指定:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --passband 9.5,10.5 --transition 3.0
+```
+
+省略形:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py 9.5 10.5 --transition 3.0
+```
+
+設計法を絞る:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --methods firwin_hamming,remez
+```
+
+タップ数を指定:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --numtaps 751
+```
+
+複数タップ数を比較:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --tap-counts 501,751,1001
+```
+
+最大遅延で候補を制限:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --passband 9,11 --transition 3.0 --max-delay-ms 10
+```
+
+JSON保存:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --save-json filter_design\fir_bpf_10hz.json
+```
+
+グラフ保存:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --save-figure filter_design\fir_bpf_10hz.png --no-show
+```
+
+係数出力:
+
+```powershell
+python filter_design\design_fir_bandpass_filter.py --print-coefficients best
+python filter_design\design_fir_bandpass_filter.py --print-coefficients all
+python filter_design\design_fir_bandpass_filter.py --print-coefficients none
+```
+
+FIRはタップ数が多く, `--print-coefficients all` は出力が長くなる.
+全候補の係数を保存したい場合は `--save-json` を推奨.
+
+### FIRで注意すること
+
+FIRは線形位相にしやすく安定性も扱いやすいが, 狭帯域BPFではタップ数が大きくなりやすい.
+タップ数が大きいほど遅延も増える.
+
+線形位相FIRの群遅延は概ね次の式になる.
+
+```text
+delay_ms = (numtaps - 1) / 2 / samplerate * 1000
+```
+
+例: `samplerate=1000 Hz`, `numtaps=747` の場合:
+
+```text
+(747 - 1) / 2 / 1000 * 1000 = 373 ms
+```
+
+リアルタイム処理で遅延が問題になる場合は, IIR版も比較する.
+オフライン解析で位相を安定して見たい場合は, FIR版が読みやすい候補になる.
+
+`--max-delay-ms` を指定すると, この式から許容される最大タップ数を計算し,
+その範囲内の候補だけを評価する.
+例えば `samplerate=1000 Hz`, `--max-delay-ms 10` では最大 `21 taps`.
+ただし狭帯域BPFでは, 10 ms以下のFIRは仕様を満たさない場合が多い.
+
 ## 探索条件
 
 主な既定値:
@@ -336,6 +451,9 @@ python filter_design\design_peak_filter.py 10 --max-direct-form-order 8
 | Pole-zero plot | 極と零点. 極が単位円内にあるかを見る |
 | Time waveform | テスト信号を入れたときの出力波形を見る |
 
+`design_fir_bandpass_filter.py` では, `Pole-zero plot` の代わりに `FIR impulse response / taps` を表示する.
+FIRは `a=(1,)` の非再帰フィルタなので, IIRのような安定性確認用の極プロットより, タップ係数の対称性と一定群遅延を見る.
+
 左側の `line` パネル:
 
 - `R1`, `R2`, ... はRank番号.
@@ -377,6 +495,19 @@ Rank 1:
 | `Q` | 鋭さ. 高いほど狭帯域 |
 | `target_delay` | target周波数での群遅延 |
 | `max_pole_abs` | 極の絶対値最大. 1未満なら理論上安定 |
+
+FIR版で追加される主な項目:
+
+| 項目 | 意味 |
+|---|---|
+| `method` | FIR設計法. `firwin_hamming`, `firwin_kaiser`, `remez`, `firls` など |
+| `window` | 窓関数または設計タイプ |
+| `numtaps` | FIR係数の数 |
+| `order` | FIR次数. `numtaps - 1` |
+| `constant group delay` | 線形位相FIRの一定群遅延 |
+| `symmetry_error` | タップ係数の左右対称誤差 |
+| `linear_phase` | 線形位相とみなせるか |
+| `meets_spec` | 通過域/阻止域仕様を満たしたか |
 
 ## PhaseTiming.pyへ係数を入れる
 
