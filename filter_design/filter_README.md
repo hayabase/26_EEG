@@ -12,6 +12,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 | [design_peak_filter.py](design_peak_filter.py) | target周波数を強調するIIRピーク/BPF候補を探索 |
 | [design_bandpass_filter.py](design_bandpass_filter.py) | 通過域, 遷移域を直接指定してIIR BPFを設計 |
 | [design_fir_bandpass_filter.py](design_fir_bandpass_filter.py) | 通過域, 遷移域を直接指定してFIR BPFを設計 |
+| [design_iir_notch_filter.py](design_iir_notch_filter.py) | 中心周波数とQを指定してIIRノッチフィルタを設計 |
 | [check_filter.py](check_filter.py) | 作成済み係数の周波数特性, 群遅延, 極配置を確認 |
 | `_tmp_auto_check.txt` | 自動確認時の一時出力, 必要なければ削除可能 |
 
@@ -21,6 +22,7 @@ SSVEP解析では, 例えば10 Hz刺激なら10 Hz付近の成分を見たい. �
 - [design_peak_filter.py](#design_peak_filterpy)
 - [design_bandpass_filter.py](#design_bandpass_filterpy)
 - [design_fir_bandpass_filter.py](#design_fir_bandpass_filterpy)
+- [design_iir_notch_filter.py](#design_iir_notch_filterpy)
 - [探索条件](#探索条件)
 - [グラフの見方](#グラフの見方)
 - [コンソール出力の見方](#コンソール出力の見方)
@@ -134,6 +136,16 @@ python filter_design\design_peak_filter.py 10 --max-target-delay-ms 1
 python filter_design\design_peak_filter.py 10 --target-delay-ms 10
 python filter_design\design_peak_filter.py 10 --target-delay-ms 50
 ```
+
+鋭い候補を総当たりで探す:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --search-preset sharp --max-target-delay-ms 10 --target-delay-neighborhood-width 1
+```
+
+`--search-preset sharp` は `family`, 通過帯域端, stopband gap, `gpass`, `gstop`
+をまとめて振る. さらに広く探す場合は `--search-preset exhaustive` を使う.
+ただし実行時間は長くなる.
 
 グラフなしでコンソール出力だけ確認:
 
@@ -250,6 +262,16 @@ JSONは `check_filter.py` で確認できる:
 python filter_design\check_filter.py --json filter_design\bpf_10hz.json --rank 1
 ```
 
+係数出力:
+
+```powershell
+python filter_design\design_bandpass_filter.py --print-coefficients best
+python filter_design\design_bandpass_filter.py --print-coefficients all
+python filter_design\design_bandpass_filter.py --print-coefficients none
+```
+
+`--print-coefficients all` ではランキング全候補の `a,b` を出力する.
+
 ## design_fir_bandpass_filter.py
 
 ### 目的
@@ -363,6 +385,77 @@ delay_ms = (numtaps - 1) / 2 / samplerate * 1000
 例えば `samplerate=1000 Hz`, `--max-delay-ms 10` では最大 `21 taps`.
 ただし狭帯域BPFでは, 10 ms以下のFIRは仕様を満たさない場合が多い.
 
+## design_iir_notch_filter.py
+
+### 目的
+
+特定の周波数だけを落とすIIRノッチフィルタを設計する.
+50 Hz/60 Hzの電源ノイズ除去などを想定している.
+
+ノッチ版は `scipy.signal.iirnotch` を使う2次IIRフィルタで,
+中心周波数とQを指定する.
+Qが大きいほどノッチ幅は狭くなり, 周辺周波数への影響は小さくなる.
+
+### 基本実行
+
+50 Hzノッチ:
+
+```powershell
+python filter_design\design_iir_notch_filter.py --target-freq 50
+```
+
+60 Hzノッチ:
+
+```powershell
+python filter_design\design_iir_notch_filter.py 60
+```
+
+Q値を複数比較:
+
+```powershell
+python filter_design\design_iir_notch_filter.py --target-freq 50 --q-values 20,30,50,100
+```
+
+ノッチ幅からQを指定:
+
+```powershell
+python filter_design\design_iir_notch_filter.py --target-freq 50 --bandwidth-hz 2
+```
+
+JSON保存:
+
+```powershell
+python filter_design\design_iir_notch_filter.py --target-freq 50 --save-json filter_design\notch_50hz.json
+```
+
+係数出力:
+
+```powershell
+python filter_design\design_iir_notch_filter.py --print-coefficients best
+python filter_design\design_iir_notch_filter.py --print-coefficients all
+python filter_design\design_iir_notch_filter.py --print-coefficients none
+```
+
+### ノッチで注意すること
+
+IIRノッチの係数は `a,b` ともに通常3個で, `order=2`.
+中心周波数には零点が置かれるため, `gain_at_50Hz` などは非常に小さい値になる.
+
+Qとノッチ幅の目安:
+
+```text
+notch_bandwidth_hz = target_freq / Q
+```
+
+例: `target_freq=50 Hz`, `Q=50` の場合:
+
+```text
+50 / 50 = 1 Hz
+```
+
+位相タイミング解析でノッチを使う場合, ノッチ周辺では群遅延が大きく見えることがある.
+オフライン解析で位相を重視するなら, `filtfilt` のようなゼロ位相処理も比較する.
+
 ## 探索条件
 
 主な既定値:
@@ -372,17 +465,27 @@ delay_ms = (numtaps - 1) / 2 / samplerate * 1000
 | `--samplerate` | `1000` | EEGサンプリング周波数[Hz] |
 | `--target-freq` | `10` | 強調したい周波数[Hz] |
 | `--family` | `butter` | IIR設計法 |
+| `--search-preset` | `standard` | 探索プリセット. `sharp`/`exhaustive`で総当たり |
+| `--families` | なし | 複数family探索. 例 `butter,cheby2,ellip` |
 | `--passband-search-width` | `1.5` | target周波数周辺で通過帯域候補を探す幅[Hz] |
 | `--passband-edge-step` | `0.05` | 通過帯域端の探索刻み[Hz] |
+| `--passband-offset-values` | なし | targetから通過帯域端までの距離候補[Hz] |
+| `--passband-search-width-values` | なし | 探索幅を複数振る候補[Hz] |
+| `--passband-edge-step-values` | なし | 刻み幅を複数振る候補[Hz] |
 | `--stopband-gap-min` | `0.5` | 通過帯域と阻止帯域の最小間隔[Hz] |
 | `--stopband-gap-max` | `4.0` | 通過帯域と阻止帯域の最大間隔[Hz] |
 | `--stopband-gap-step` | `0.25` | 阻止帯域間隔の探索刻み[Hz] |
+| `--stopband-gap-values` | なし | stopband gapを直接総当たりする候補[Hz] |
 | `--gpass-values` | `1` | 通過域端最大損失[dB] |
 | `--gstop-values` | `20,60,80,100,150,200` | 阻止域端最小減衰[dB] |
 | `--acceptable-gain-db` | `-1` | target周波数で許容する最小ゲイン[dB] |
 | `--max-target-gain-db` | `3` | target周波数で許容する最大ゲイン[dB] |
+| `--target-neighborhood-width` | `0.5` | target周波数周辺ゲインを確認する半幅[Hz] |
+| `--max-near-target-gain-db` | `3` | target周辺範囲で許容する最大ゲイン[dB] |
 | `--max-q` | `150` | Q値の上限 |
-| `--max-target-delay-ms` | `1000` | target周波数で許容する最大群遅延[ms] |
+| `--max-target-delay-ms` | `1000` | target周波数と周辺で許容する最大群遅延[ms] |
+| `--target-delay-neighborhood-width` | `1.0` | 群遅延上限を確認するtarget周波数周辺の半幅[Hz] |
+| `--target-delay-neighborhood-points` | `401` | 周辺群遅延を走査する点数 |
 | `--max-pole-abs` | `0.9998` | 極の絶対値上限 |
 | `--max-direct-form-order` | `10` | a,b直接形の最大次数 |
 | `--top-n` | `10` | 表示する候補数 |
@@ -403,6 +506,14 @@ target周波数の群遅延を1 ms以下に絞る場合:
 python filter_design\design_peak_filter.py 10 --max-target-delay-ms 1
 ```
 
+既定では `target_freq ± 1.0 Hz` の範囲も走査し, その範囲内の最大絶対群遅延が
+`--max-target-delay-ms` を超える候補も除外する.
+周辺幅を変える場合:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 10 --target-delay-neighborhood-width 1
+```
+
 または短い別名:
 
 ```powershell
@@ -414,11 +525,32 @@ python filter_design\design_peak_filter.py 10 --target-delay-ms 1
 
 ### 条件を厳しくする例
 
+鋭さを優先して広く探す:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --search-preset sharp --max-target-delay-ms 10 --target-delay-neighborhood-width 1
+```
+
+手動で総当たり範囲を指定する:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --families butter,cheby2,ellip --passband-offset-values 0.02,0.03,0.05,0.075,0.1,0.15,0.2 --stopband-gap-values 0.05,0.1,0.2,0.5,1.0 --gpass-values 0.5,1,2 --gstop-values 20,40,60,80 --max-target-delay-ms 10 --target-delay-neighborhood-width 1
+```
+
 target周波数の過剰な増幅を避ける:
 
 ```powershell
 python filter_design\design_peak_filter.py 10 --max-target-gain-db 1
 ```
+
+target周波数の一点だけでなく, 周辺の鋭い盛り上がりも避ける:
+
+```powershell
+python filter_design\design_peak_filter.py 10 --target-neighborhood-width 0.5 --max-near-target-gain-db 3
+```
+
+`--target-neighborhood-width 0.5` は `target_freq ± 0.5 Hz` の範囲を確認する.
+この範囲内の最大ゲインが `--max-near-target-gain-db` を超える候補は除外される.
 
 遅延が大きい候補を避ける:
 
@@ -475,9 +607,11 @@ Rank 1:
   gpass: 1.00 dB
   gstop: 80.00 dB
   gain_at_10Hz: 0.02 dB
+  near_target_max_gain: 0.03 dB at 9.9500 Hz
   bandwidth_3db: 0.1563 Hz
   Q: 64.00
   target_delay: 568.12 ms
+  near_target_max_delay: 820.45 ms at 9.1200 Hz
   max_pole_abs: 0.99970589
 ```
 
@@ -491,9 +625,11 @@ Rank 1:
 | `gpass` | 通過域端最大損失 |
 | `gstop` | 阻止域端最小減衰 |
 | `gain_at_10Hz` | target周波数でのゲイン |
+| `near_target_max_gain` | target周辺範囲での最大ゲイン |
 | `bandwidth_3db` | -3 dB帯域幅 |
 | `Q` | 鋭さ. 高いほど狭帯域 |
 | `target_delay` | target周波数での群遅延 |
+| `near_target_max_delay` | target周辺範囲での最大絶対群遅延 |
 | `max_pole_abs` | 極の絶対値最大. 1未満なら理論上安定 |
 
 FIR版で追加される主な項目:
@@ -511,7 +647,8 @@ FIR版で追加される主な項目:
 
 ## PhaseTiming.pyへ係数を入れる
 
-`design_peak_filter.py` の最後に以下のような出力が出る.
+`design_peak_filter.py`, `design_bandpass_filter.py`, `design_fir_bandpass_filter.py`
+の最後に以下のような出力が出る.
 
 ```python
 DEFAULT_BANDPASS_A = (
@@ -528,11 +665,23 @@ DEFAULT_BANDPASS_B = (
 ```
 
 これを `analysis/PhaseTiming.py` 冒頭の同名定数へ貼る.
+`PhaseTiming_ch1_minus_ch2.py` も `PhaseTiming.py` の係数を参照する.
 
 一時的にコマンドラインで指定する場合:
 
 ```powershell
 python analysis\PhaseTiming.py max2_parallel_20260520_185539 --filter-a "1,-3.97,5.93,-3.94,0.98" --filter-b "0.000039,0,-0.000078,0,0.000039"
+```
+
+IIRノッチを使う場合は `design_iir_notch_filter.py` の
+`DEFAULT_NOTCH_A`, `DEFAULT_NOTCH_B` 形式の出力を,
+`analysis/PhaseTiming.py` または `analysis/Wavelet.py` 冒頭の
+`DEFAULT_NOTCH_A/B` へ貼る.
+実行時は `--notch on` で有効化する. 既定はOFF.
+
+```powershell
+python analysis\PhaseTiming.py max2_parallel_20260520_185539 --notch on
+python analysis\Wavelet.py max2_parallel_20260520_185539 --notch on
 ```
 
 ## check_filter.py
@@ -654,7 +803,9 @@ Qが高いほど狭い範囲だけを通す. ただし, 一般に群遅延が増
 
 周波数成分がフィルタを通ったときの遅れ. 位相タイミングを見る解析では重要.
 
-`design_peak_filter.py` では `--max-target-delay-ms` でtarget周波数の遅延が大きい候補を除外できる.
+`design_peak_filter.py` では `--max-target-delay-ms` でtarget周波数とその周辺の遅延が大きい候補を除外できる.
+既定では `--target-delay-neighborhood-width 1.0` なので, `target_freq ± 1.0 Hz` の最大絶対群遅延も同じ上限で判定する.
+target一点だけで判定したい場合は `--target-delay-neighborhood-width 0` を指定する.
 
 ### 極と安定性
 
@@ -700,12 +851,20 @@ conda activate eeg-max2
 条件が厳しすぎる可能性がある.
 
 ```powershell
-python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0 --max-target-gain-db 0
+python filter_design\design_peak_filter.py 10 --max-target-delay-ms 0 --max-q 0 --max-target-gain-db 0 --max-near-target-gain-db 0
 ```
+
+周辺の群遅延だけが厳しい場合は, `--target-delay-neighborhood-width 0` でtarget一点のみの確認に戻せる.
 
 ### Rankが似て見える
 
 係数がほぼ同じ候補は重複除去しているが, 設定が近い候補は似た形になりやすい. 左側の `R1`, `R2` チェックで重ね表示を整理すると見やすい.
+
+### 総当たり探索が遅い
+
+`--search-preset sharp` や `--search-preset exhaustive` は探索数が増える.
+短く確認したい場合は `--no-plot --no-check-filter --no-progress` を付ける.
+さらに絞る場合は `--families cheby2` や `--passband-offset-values 0.02,0.05,0.1,0.2` のように候補を減らす.
 
 ### 群遅延が大きい
 

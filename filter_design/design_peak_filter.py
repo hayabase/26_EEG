@@ -23,6 +23,31 @@ from typing import Iterable
 import numpy as np
 
 
+SUPPORTED_FAMILIES = ("butter", "cheby1", "cheby2", "ellip")
+
+SEARCH_PRESET_OVERRIDES = {
+    "sharp": {
+        "families": "butter,cheby2,ellip,cheby1",
+        "passband_offset_values": "0.02,0.03,0.05,0.075,0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.65,0.8,1.0",
+        "stopband_gap_values": "0.05,0.1,0.2,0.35,0.5,0.75,1.0,1.5,2.5,4.0",
+        "gpass_values": "0.5,1,2",
+        "gstop_values": "20,40,60,80,100",
+        "top_n": 20,
+    },
+    "exhaustive": {
+        "families": "butter,cheby2,ellip,cheby1",
+        "passband_offset_values": (
+            "0.01,0.015,0.02,0.03,0.04,0.05,0.075,0.1,0.15,0.2,"
+            "0.25,0.3,0.4,0.5,0.65,0.8,1.0,1.25,1.5"
+        ),
+        "stopband_gap_values": "0.025,0.05,0.075,0.1,0.15,0.2,0.35,0.5,0.75,1.0,1.5,2.5,4.0",
+        "gpass_values": "0.1,0.3,0.5,1,2,3",
+        "gstop_values": "20,40,60,80,100,150,200",
+        "top_n": 30,
+    },
+}
+
+
 # サンプリング周波数, EEGの取得レート.
 DEFAULT_SAMPLERATE = 1000.0
 
@@ -44,6 +69,24 @@ DEFAULT_STOPBAND_GAP_MAX = 4.0
 # 阻止帯と通過帯の間隔の刻み幅, 鋭さの違いを比較する.
 DEFAULT_STOPBAND_GAP_STEP = 0.25
 
+# 総当たり探索プリセット. standardは従来相当, sharp/exhaustiveは探索変数を増やす.
+DEFAULT_SEARCH_PRESET = "standard"
+
+# 複数family探索の既定値. 未指定時は --family と同じ単一familyを使う.
+DEFAULT_FAMILIES = None
+
+# targetから通過帯域端までの距離候補[Hz]. 指定時は左右オフセット総当たり.
+DEFAULT_PASSBAND_OFFSET_VALUES = None
+
+# 通過帯域候補の探索幅を複数振る場合の候補[Hz].
+DEFAULT_PASSBAND_SEARCH_WIDTH_VALUES = None
+
+# 通過帯域端刻みを複数振る場合の候補[Hz].
+DEFAULT_PASSBAND_EDGE_STEP_VALUES = None
+
+# stopband gapを明示的に総当たりする候補[Hz].
+DEFAULT_STOPBAND_GAP_VALUES = None
+
 # 通過域端最大損失[dB], 小さいほど通過帯が平坦.
 DEFAULT_GPASS_VALUES = "1"
 
@@ -56,11 +99,23 @@ DEFAULT_ACCEPTABLE_GAIN_DB = -1.0
 # target周波数で許容する最大ゲイン[dB], +3dBを超える候補を除外.
 DEFAULT_MAX_TARGET_GAIN_DB = 3.0
 
+# target周波数周辺で発振的な盛り上がりを監視する半幅[Hz].
+DEFAULT_TARGET_NEIGHBORHOOD_WIDTH = 0.5
+
+# target周波数周辺で許容する最大ゲイン[dB], target一点だけでなく周辺も除外.
+DEFAULT_MAX_NEAR_TARGET_GAIN_DB = DEFAULT_MAX_TARGET_GAIN_DB
+
 # Q値の上限, 鋭さを残しつつ極端な遅延を避ける.
 DEFAULT_MAX_Q = 150.0
 
 # target_freqで許容する最大群遅延[ms], 大きすぎる位相ずれを避ける.
 DEFAULT_MAX_TARGET_DELAY_MS = 1000.0
+
+# 群遅延の上限を確認するtarget周波数周辺の半幅[Hz].
+DEFAULT_TARGET_DELAY_NEIGHBORHOOD_WIDTH = 1.0
+
+# target周波数周辺の群遅延を走査する点数.
+DEFAULT_TARGET_DELAY_NEIGHBORHOOD_POINTS = 401
 
 # 極の絶対値の上限, 鋭いが単位円に近すぎる候補は避ける.
 DEFAULT_MAX_POLE_ABS = 0.9998
@@ -109,7 +164,11 @@ class FilterCandidate:
     q_value: float
     bandwidth_3db: float
     gain_at_target_db: float
+    near_target_max_gain_db: float
+    near_target_peak_freq_hz: float
     target_delay_ms: float
+    near_target_max_delay_ms: float
+    near_target_delay_peak_freq_hz: float
     max_pole_abs: float
     frequencies: np.ndarray
     response_db: np.ndarray
@@ -133,7 +192,11 @@ class FilterCandidate:
             "q_value": self.q_value,
             "bandwidth_3db": self.bandwidth_3db,
             "gain_at_target_db": self.gain_at_target_db,
+            "near_target_max_gain_db": self.near_target_max_gain_db,
+            "near_target_peak_freq_hz": self.near_target_peak_freq_hz,
             "target_delay_ms": self.target_delay_ms,
+            "near_target_max_delay_ms": self.near_target_max_delay_ms,
+            "near_target_delay_peak_freq_hz": self.near_target_delay_peak_freq_hz,
             "max_pole_abs": self.max_pole_abs,
         }
 
@@ -147,6 +210,39 @@ def parse_float_list(text: str) -> list[float]:
     if not values:
         raise argparse.ArgumentTypeError("値を1つ以上指定する必要あり")
     return values
+
+
+def parse_optional_float_list(text: str | None) -> list[float] | None:
+    if text is None:
+        return None
+    return parse_float_list(text)
+
+
+def parse_name_list(text: str | None) -> list[str]:
+    if text is None:
+        return []
+    values = []
+    for item in text.split(","):
+        item = item.strip()
+        if item:
+            values.append(item)
+    return values
+
+
+def unique_floats(values: Iterable[float], digits: int = 10) -> list[float]:
+    unique = {}
+    for value in values:
+        rounded = round(float(value), digits)
+        unique[rounded] = float(value)
+    return [unique[key] for key in sorted(unique)]
+
+
+def unique_pairs(values: Iterable[tuple[float, float]], digits: int = 10) -> list[tuple[float, float]]:
+    unique = {}
+    for left, right in values:
+        key = (round(float(left), digits), round(float(right), digits))
+        unique[key] = (float(left), float(right))
+    return [unique[key] for key in sorted(unique)]
 
 
 def frange(start: float, stop: float, step: float) -> np.ndarray:
@@ -184,7 +280,9 @@ def design_iir(signal, family: str, wp: np.ndarray, ws: np.ndarray, gpass: float
 
 
 def response_db(signal, b: np.ndarray, a: np.ndarray, samplerate: float, wor_n: int):
-    w, h = signal.freqz(b, a, worN=wor_n)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        w, h = signal.freqz(b, a, worN=wor_n)
     frequencies = w / (2.0 * np.pi) * samplerate
     magnitude = np.abs(h)
     magnitude[magnitude == 0] = 1e-20
@@ -199,9 +297,80 @@ def target_group_delay_ms(signal, b: np.ndarray, a: np.ndarray, samplerate: floa
             message=".*denominator is extremely small.*",
             category=UserWarning,
         )
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
         _, delay_samples = signal.group_delay((b, a), w=np.asarray([target_w]))
     delay_ms = float(delay_samples[0] / samplerate * 1000.0)
     return delay_ms
+
+
+def group_delay_ms_at_frequencies(
+    signal,
+    b: np.ndarray,
+    a: np.ndarray,
+    samplerate: float,
+    frequencies: np.ndarray,
+) -> np.ndarray:
+    w = 2.0 * np.pi * np.asarray(frequencies, dtype=float) / samplerate
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*denominator is extremely small.*",
+            category=UserWarning,
+        )
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        _, delay_samples = signal.group_delay((b, a), w=w)
+    return np.asarray(delay_samples, dtype=float) / samplerate * 1000.0
+
+
+def target_and_near_delay_ms(
+    signal,
+    b: np.ndarray,
+    a: np.ndarray,
+    samplerate: float,
+    target_freq: float,
+    half_width_hz: float,
+    point_count: int,
+) -> tuple[float, float, float]:
+    nyquist = samplerate / 2.0
+    if half_width_hz <= 0:
+        raw_delay = target_group_delay_ms(signal, b, a, samplerate, target_freq)
+        delay_ms = abs(raw_delay)
+        return delay_ms, delay_ms, float(target_freq)
+
+    lower = max(np.finfo(float).eps, target_freq - half_width_hz)
+    upper = min(nyquist - np.finfo(float).eps, target_freq + half_width_hz)
+    if lower >= upper:
+        raw_delay = target_group_delay_ms(signal, b, a, samplerate, target_freq)
+        delay_ms = abs(raw_delay)
+        return delay_ms, delay_ms, float(target_freq)
+
+    point_count = max(int(point_count), 3)
+    scan_freqs = np.linspace(lower, upper, point_count)
+    scan_freqs = np.unique(np.concatenate([scan_freqs, np.asarray([target_freq])]))
+    scan_freqs = scan_freqs[(scan_freqs > 0.0) & (scan_freqs < nyquist)]
+    if scan_freqs.size == 0:
+        raw_delay = target_group_delay_ms(signal, b, a, samplerate, target_freq)
+        delay_ms = abs(raw_delay)
+        return delay_ms, delay_ms, float(target_freq)
+
+    delays_ms = group_delay_ms_at_frequencies(signal, b, a, samplerate, scan_freqs)
+    abs_delays_ms = np.abs(delays_ms)
+    finite_mask = np.isfinite(abs_delays_ms)
+    if not np.any(finite_mask):
+        return math.nan, math.nan, math.nan
+
+    target_index = int(np.argmin(np.abs(scan_freqs - target_freq)))
+    target_delay_ms = float(abs_delays_ms[target_index])
+    if not np.isfinite(target_delay_ms):
+        return math.nan, math.nan, math.nan
+
+    finite_indexes = np.flatnonzero(finite_mask)
+    peak_index = int(finite_indexes[np.argmax(abs_delays_ms[finite_indexes])])
+    return (
+        target_delay_ms,
+        float(abs_delays_ms[peak_index]),
+        float(scan_freqs[peak_index]),
+    )
 
 
 def db_to_amplitude_ratio(db_values):
@@ -256,6 +425,35 @@ def calc_bandwidth_and_q(frequencies: np.ndarray, db_values: np.ndarray, target_
     return bandwidth, float(target_freq / bandwidth)
 
 
+def max_gain_near_target(
+    frequencies: np.ndarray,
+    db_values: np.ndarray,
+    target_freq: float,
+    half_width_hz: float,
+    gain_at_target: float,
+) -> tuple[float, float]:
+    if half_width_hz <= 0:
+        return float(gain_at_target), float(target_freq)
+
+    lower = target_freq - half_width_hz
+    upper = target_freq + half_width_hz
+    mask = (
+        (frequencies >= lower)
+        & (frequencies <= upper)
+        & np.isfinite(db_values)
+    )
+    if not np.any(mask):
+        return float(gain_at_target), float(target_freq)
+
+    indexes = np.flatnonzero(mask)
+    peak_index = int(indexes[np.argmax(db_values[indexes])])
+    peak_gain = float(db_values[peak_index])
+    peak_freq = float(frequencies[peak_index])
+    if np.isfinite(gain_at_target) and gain_at_target > peak_gain:
+        return float(gain_at_target), float(target_freq)
+    return peak_gain, peak_freq
+
+
 def iter_candidate_edges(target_freq: float, search_width: float, edge_step: float):
     half_width = search_width / 2.0
     low_values = frange(max(0.01, target_freq - half_width), target_freq - edge_step, edge_step)
@@ -264,6 +462,56 @@ def iter_candidate_edges(target_freq: float, search_width: float, edge_step: flo
         for fp1 in high_values:
             if fp0 < target_freq < fp1:
                 yield float(fp0), float(fp1)
+
+
+def iter_candidate_edges_from_offsets(target_freq: float, offset_values: list[float]):
+    offsets = [float(value) for value in offset_values if float(value) > 0.0]
+    for low_offset in offsets:
+        for high_offset in offsets:
+            fp0 = target_freq - low_offset
+            fp1 = target_freq + high_offset
+            if fp0 > 0.0 and fp0 < target_freq < fp1:
+                yield float(fp0), float(fp1)
+
+
+def build_pass_edges(args: argparse.Namespace) -> list[tuple[float, float]]:
+    offset_values = parse_optional_float_list(args.passband_offset_values)
+    if offset_values is not None:
+        return unique_pairs(iter_candidate_edges_from_offsets(args.target_freq, offset_values))
+
+    width_values = parse_optional_float_list(args.passband_search_width_values)
+    if width_values is None:
+        width_values = [args.passband_search_width]
+
+    edge_step_values = parse_optional_float_list(args.passband_edge_step_values)
+    if edge_step_values is None:
+        edge_step_values = [args.passband_edge_step]
+
+    edges = []
+    for search_width in width_values:
+        for edge_step in edge_step_values:
+            edges.extend(iter_candidate_edges(args.target_freq, search_width, edge_step))
+    return unique_pairs(edges)
+
+
+def build_stop_gaps(args: argparse.Namespace) -> list[float]:
+    explicit_values = parse_optional_float_list(args.stopband_gap_values)
+    if explicit_values is not None:
+        return unique_floats(value for value in explicit_values if value > 0.0)
+    return unique_floats(frange(args.stopband_gap_min, args.stopband_gap_max, args.stopband_gap_step))
+
+
+def build_families(args: argparse.Namespace) -> list[str]:
+    family_text = args.families if args.families else args.family
+    families = []
+    for family in parse_name_list(family_text):
+        if family not in SUPPORTED_FAMILIES:
+            raise ValueError(f"family は {', '.join(SUPPORTED_FAMILIES)} のいずれか")
+        if family not in families:
+            families.append(family)
+    if not families:
+        families = [args.family]
+    return families
 
 
 def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
@@ -275,99 +523,149 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
     if not 0.0 < target_freq < nyquist:
         raise ValueError("target_freq は 0Hzより大きく, ナイキスト周波数より小さい必要あり")
 
-    pass_edges = list(iter_candidate_edges(target_freq, args.passband_search_width, args.passband_edge_step))
-    stop_gaps = frange(args.stopband_gap_min, args.stopband_gap_max, args.stopband_gap_step)
+    families = build_families(args)
+    pass_edges = build_pass_edges(args)
+    stop_gaps = build_stop_gaps(args)
     gpass_values = parse_float_list(args.gpass_values)
     gstop_values = parse_float_list(args.gstop_values)
-    total = len(pass_edges) * len(stop_gaps) * len(gpass_values) * len(gstop_values)
+    total = len(families) * len(pass_edges) * len(stop_gaps) * len(gpass_values) * len(gstop_values)
     progress_unit = max(total // 100, 1)
     candidates: list[FilterCandidate] = []
 
     if total == 0:
         raise ValueError("探索範囲が空, passband_search_width と passband_edge_step を確認")
 
+    if args.progress:
+        print(
+            "Search space: "
+            f"preset={args.search_preset}, "
+            f"families={','.join(families)}, "
+            f"pass_edges={len(pass_edges)}, "
+            f"stop_gaps={len(stop_gaps)}, "
+            f"gpass={len(gpass_values)}, "
+            f"gstop={len(gstop_values)}, "
+            f"total={total}"
+        )
+
     step_count = 0
-    for gpass in gpass_values:
-        for gstop in gstop_values:
-            for stop_gap in stop_gaps:
-                for fp0, fp1 in pass_edges:
-                    step_count += 1
-                    if args.progress and (step_count == 1 or step_count % progress_unit == 0 or step_count == total):
-                        progress = step_count / total * 100.0
-                        print(f"Progress: {progress:6.2f}% ({step_count}/{total})", end="\r")
+    for family in families:
+        for gpass in gpass_values:
+            for gstop in gstop_values:
+                for stop_gap in stop_gaps:
+                    for fp0, fp1 in pass_edges:
+                        step_count += 1
+                        if args.progress and (step_count == 1 or step_count % progress_unit == 0 or step_count == total):
+                            progress = step_count / total * 100.0
+                            print(f"Progress: {progress:6.2f}% ({step_count}/{total})", end="\r")
 
-                    fs0 = fp0 - stop_gap
-                    fs1 = fp1 + stop_gap
-                    if fs0 <= 0.0 or fs1 >= nyquist:
-                        continue
-                    if not (fs0 < fp0 < target_freq < fp1 < fs1):
-                        continue
+                        fs0 = fp0 - stop_gap
+                        fs1 = fp1 + stop_gap
+                        if fs0 <= 0.0 or fs1 >= nyquist:
+                            continue
+                        if not (fs0 < fp0 < target_freq < fp1 < fs1):
+                            continue
 
-                    wp = np.array([fp0 / nyquist, fp1 / nyquist], dtype=float)
-                    ws = np.array([fs0 / nyquist, fs1 / nyquist], dtype=float)
+                        wp = np.array([fp0 / nyquist, fp1 / nyquist], dtype=float)
+                        ws = np.array([fs0 / nyquist, fs1 / nyquist], dtype=float)
 
-                    try:
-                        order, b, a = design_iir(signal, args.family, wp, ws, gpass, gstop)
-                    except ValueError:
-                        continue
+                        try:
+                            with warnings.catch_warnings():
+                                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                                order, b, a = design_iir(signal, family, wp, ws, gpass, gstop)
+                        except ValueError:
+                            continue
 
-                    direct_form_order = len(a) - 1
-                    if (
-                        args.max_direct_form_order is not None
-                        and direct_form_order > args.max_direct_form_order
-                    ):
-                        continue
+                        direct_form_order = len(a) - 1
+                        if (
+                            args.max_direct_form_order is not None
+                            and direct_form_order > args.max_direct_form_order
+                        ):
+                            continue
 
-                    poles = np.roots(a)
-                    max_pole_abs = float(np.max(np.abs(poles))) if poles.size else 0.0
-                    if max_pole_abs >= args.max_pole_abs:
-                        continue
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore", category=RuntimeWarning)
+                            poles = np.roots(a)
+                            pole_abs = np.abs(poles)
+                            max_pole_abs = float(np.max(pole_abs)) if pole_abs.size else 0.0
+                        if not np.isfinite(max_pole_abs):
+                            continue
+                        if max_pole_abs >= args.max_pole_abs:
+                            continue
 
-                    frequencies, db_values = response_db(signal, b, a, samplerate, args.wor_n)
-                    gain_at_target = float(np.interp(target_freq, frequencies, db_values))
-                    if gain_at_target < args.acceptable_gain_db:
-                        continue
-                    if (
-                        args.max_target_gain_db is not None
-                        and gain_at_target > args.max_target_gain_db
-                    ):
-                        continue
+                        frequencies, db_values = response_db(signal, b, a, samplerate, args.wor_n)
+                        gain_at_target = float(np.interp(target_freq, frequencies, db_values))
+                        if gain_at_target < args.acceptable_gain_db:
+                            continue
+                        if (
+                            args.max_target_gain_db is not None
+                            and gain_at_target > args.max_target_gain_db
+                        ):
+                            continue
 
-                    bandwidth, q_value = calc_bandwidth_and_q(
-                        frequencies, db_values, target_freq, gain_at_target
-                    )
-                    if bandwidth is None or q_value is None:
-                        continue
-                    if args.max_q is not None and q_value > args.max_q:
-                        continue
-
-                    raw_delay_ms = target_group_delay_ms(signal, b, a, samplerate, target_freq)
-                    if not np.isfinite(raw_delay_ms):
-                        continue
-                    delay_ms = abs(raw_delay_ms)
-                    if args.max_target_delay_ms is not None and delay_ms > args.max_target_delay_ms:
-                        continue
-
-                    candidates.append(
-                        FilterCandidate(
-                            family=args.family,
-                            order=int(order),
-                            b=b,
-                            a=a,
-                            fp=(float(fp0), float(fp1)),
-                            fs=(float(fs0), float(fs1)),
-                            gpass=float(gpass),
-                            gstop=float(gstop),
-                            acceptable_gain_db=float(args.acceptable_gain_db),
-                            q_value=float(q_value),
-                            bandwidth_3db=float(bandwidth),
-                            gain_at_target_db=gain_at_target,
-                            target_delay_ms=delay_ms,
-                            max_pole_abs=max_pole_abs,
-                            frequencies=frequencies,
-                            response_db=db_values,
+                        near_target_max_gain, near_target_peak_freq = max_gain_near_target(
+                            frequencies,
+                            db_values,
+                            target_freq,
+                            args.target_neighborhood_width,
+                            gain_at_target,
                         )
-                    )
+                        if not np.isfinite(near_target_max_gain):
+                            continue
+                        if (
+                            args.max_near_target_gain_db is not None
+                            and near_target_max_gain > args.max_near_target_gain_db
+                        ):
+                            continue
+
+                        bandwidth, q_value = calc_bandwidth_and_q(
+                            frequencies, db_values, target_freq, gain_at_target
+                        )
+                        if bandwidth is None or q_value is None:
+                            continue
+                        if args.max_q is not None and q_value > args.max_q:
+                            continue
+
+                        delay_ms, near_delay_ms, near_delay_peak_freq = target_and_near_delay_ms(
+                            signal,
+                            b,
+                            a,
+                            samplerate,
+                            target_freq,
+                            args.target_delay_neighborhood_width,
+                            args.target_delay_neighborhood_points,
+                        )
+                        if not np.isfinite(delay_ms) or not np.isfinite(near_delay_ms):
+                            continue
+                        if args.max_target_delay_ms is not None:
+                            if delay_ms > args.max_target_delay_ms:
+                                continue
+                            if near_delay_ms > args.max_target_delay_ms:
+                                continue
+
+                        candidates.append(
+                            FilterCandidate(
+                                family=family,
+                                order=int(order),
+                                b=b,
+                                a=a,
+                                fp=(float(fp0), float(fp1)),
+                                fs=(float(fs0), float(fs1)),
+                                gpass=float(gpass),
+                                gstop=float(gstop),
+                                acceptable_gain_db=float(args.acceptable_gain_db),
+                                q_value=float(q_value),
+                                bandwidth_3db=float(bandwidth),
+                                gain_at_target_db=gain_at_target,
+                                near_target_max_gain_db=near_target_max_gain,
+                                near_target_peak_freq_hz=near_target_peak_freq,
+                                target_delay_ms=delay_ms,
+                                near_target_max_delay_ms=near_delay_ms,
+                                near_target_delay_peak_freq_hz=near_delay_peak_freq,
+                                max_pole_abs=max_pole_abs,
+                                frequencies=frequencies,
+                                response_db=db_values,
+                            )
+                        )
 
     if args.progress:
         print()
@@ -375,6 +673,7 @@ def find_candidates(args: argparse.Namespace) -> list[FilterCandidate]:
     candidates.sort(
         key=lambda item: (
             item.q_value,
+            -item.near_target_max_delay_ms,
             -abs(item.target_delay_ms),
             -item.direct_form_order,
             item.gain_at_target_db,
@@ -424,9 +723,19 @@ def print_candidates(candidates: list[FilterCandidate], target_freq: float):
         print(f"  gpass: {candidate.gpass:.2f} dB")
         print(f"  gstop: {candidate.gstop:.2f} dB")
         print(f"  gain_at_{target_freq:g}Hz: {candidate.gain_at_target_db:.2f} dB")
+        print(
+            "  near_target_max_gain: "
+            f"{candidate.near_target_max_gain_db:.2f} dB "
+            f"at {candidate.near_target_peak_freq_hz:.4f} Hz"
+        )
         print(f"  bandwidth_3db: {candidate.bandwidth_3db:.4f} Hz")
         print(f"  Q: {candidate.q_value:.2f}")
         print(f"  target_delay: {candidate.target_delay_ms:.2f} ms")
+        print(
+            "  near_target_max_delay: "
+            f"{candidate.near_target_max_delay_ms:.2f} ms "
+            f"at {candidate.near_target_delay_peak_freq_hz:.4f} Hz"
+        )
         print(f"  max_pole_abs: {candidate.max_pole_abs:.8f}")
         print()
 
@@ -442,18 +751,28 @@ def save_candidates(path: Path, args: argparse.Namespace, candidates: list[Filte
         "settings": {
             "samplerate": args.samplerate,
             "target_freq": args.target_freq,
+            "search_preset": args.search_preset,
             "family": args.family,
+            "families": build_families(args),
             "passband_search_width": args.passband_search_width,
             "passband_edge_step": args.passband_edge_step,
+            "passband_offset_values": parse_optional_float_list(args.passband_offset_values),
+            "passband_search_width_values": parse_optional_float_list(args.passband_search_width_values),
+            "passband_edge_step_values": parse_optional_float_list(args.passband_edge_step_values),
             "stopband_gap_min": args.stopband_gap_min,
             "stopband_gap_max": args.stopband_gap_max,
             "stopband_gap_step": args.stopband_gap_step,
+            "stopband_gap_values": parse_optional_float_list(args.stopband_gap_values),
             "gpass_values": parse_float_list(args.gpass_values),
             "gstop_values": parse_float_list(args.gstop_values),
             "acceptable_gain_db": args.acceptable_gain_db,
             "max_target_gain_db": args.max_target_gain_db,
+            "target_neighborhood_width": args.target_neighborhood_width,
+            "max_near_target_gain_db": args.max_near_target_gain_db,
             "max_q": args.max_q,
             "max_target_delay_ms": args.max_target_delay_ms,
+            "target_delay_neighborhood_width": args.target_delay_neighborhood_width,
+            "target_delay_neighborhood_points": args.target_delay_neighborhood_points,
             "max_pole_abs": args.max_pole_abs,
             "max_direct_form_order": args.max_direct_form_order,
         },
@@ -472,7 +791,8 @@ def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Na
             f"Rank {rank}, Q={candidate.q_value:.1f}, "
             f"order={candidate.direct_form_order}, "
             f"target={candidate.gain_at_target_db:.1f} dB, "
-            f"delay={candidate.target_delay_ms:.0f} ms"
+            f"near={candidate.near_target_max_gain_db:.1f} dB, "
+            f"near delay={candidate.near_target_max_delay_ms:.0f} ms"
         )
         ax_response.plot(candidate.frequencies[mask], candidate.response_db[mask], label=label)
 
@@ -491,7 +811,10 @@ def draw_candidate_overview(candidates: list[FilterCandidate], args: argparse.Na
             ax_delay.plot(
                 delay_freq[delay_mask],
                 delay_ms[delay_mask],
-                label=f"Rank {rank}, target delay={target_delay:.1f} ms",
+                label=(
+                    f"Rank {rank}, target delay={target_delay:.1f} ms, "
+                    f"near max={candidate.near_target_max_delay_ms:.1f} ms"
+                ),
             )
         except Exception as exc:  # scipyの数値警告で失敗する候補あり.
             print(f"Rank {rank} の群遅延表示をスキップ: {exc}")
@@ -953,10 +1276,24 @@ def apply_interactive_inputs(args: argparse.Namespace):
     print("ピークフィルタ設計, Enterで既定値を使用.")
     args.samplerate = ask_float("サンプリング周波数[Hz]", args.samplerate)
     args.target_freq = ask_float("強調する周波数[Hz]", args.target_freq)
+    args.search_preset = ask_choice("探索プリセット", ["standard", "sharp", "exhaustive"], args.search_preset)
     args.family = ask_choice("IIR設計法", ["butter", "cheby1", "cheby2", "ellip"], args.family)
 
     edit_detail = ask_bool("詳細設定を変更する", False)
     if edit_detail:
+        args.families = ask_text("探索するIIR設計法, カンマ区切り", args.families or args.family)
+        args.passband_offset_values = ask_text(
+            "targetから通過帯域端までの距離候補[Hz], カンマ区切り, 空なら通常探索",
+            args.passband_offset_values or "",
+        )
+        if args.passband_offset_values == "":
+            args.passband_offset_values = None
+        args.stopband_gap_values = ask_text(
+            "stopband gap候補[Hz], カンマ区切り, 空ならmin/max/step",
+            args.stopband_gap_values or "",
+        )
+        if args.stopband_gap_values == "":
+            args.stopband_gap_values = None
         args.passband_search_width = ask_float("通過帯域候補の探索幅[Hz]", args.passband_search_width)
         args.passband_edge_step = ask_float("通過帯域端候補の刻み幅[Hz]", args.passband_edge_step)
         args.stopband_gap_min = ask_float("阻止帯ギャップ最小[Hz]", args.stopband_gap_min)
@@ -965,11 +1302,33 @@ def apply_interactive_inputs(args: argparse.Namespace):
         args.gpass_values = ask_text("通過域端最大損失[dB], カンマ区切り", args.gpass_values)
         args.gstop_values = ask_text("阻止域端最小減衰[dB], カンマ区切り", args.gstop_values)
         args.acceptable_gain_db = ask_float("target周波数の許容最小ゲイン[dB]", args.acceptable_gain_db)
+        args.max_target_gain_db = ask_float(
+            "target周波数の許容最大ゲイン[dB], 0で制限なし",
+            args.max_target_gain_db,
+            allow_none=True,
+        )
+        args.target_neighborhood_width = ask_float(
+            "target周波数周辺ゲイン確認幅[Hz], target±幅",
+            args.target_neighborhood_width,
+        )
+        args.max_near_target_gain_db = ask_float(
+            "target周波数周辺の許容最大ゲイン[dB], 0で制限なし",
+            args.max_near_target_gain_db,
+            allow_none=True,
+        )
         args.max_q = ask_float("Q値上限, 0で制限なし", args.max_q, allow_none=True)
         args.max_target_delay_ms = ask_float(
             "target周波数の群遅延上限[ms], 0で制限なし",
             args.max_target_delay_ms,
             allow_none=True,
+        )
+        args.target_delay_neighborhood_width = ask_float(
+            "群遅延上限を確認するtarget周波数周辺幅[Hz], target±幅",
+            args.target_delay_neighborhood_width,
+        )
+        args.target_delay_neighborhood_points = ask_int(
+            "群遅延周辺確認の走査点数",
+            args.target_delay_neighborhood_points,
         )
         args.max_pole_abs = ask_float("極の絶対値上限", args.max_pole_abs)
         args.max_direct_form_order = ask_int(
@@ -1005,6 +1364,46 @@ def apply_positional_args(args: argparse.Namespace):
         if values[2] not in ("butter", "cheby1", "cheby2", "ellip"):
             raise ValueError("family は butter, cheby1, cheby2, ellip のいずれか")
         args.family = values[2]
+
+
+def option_supplied(argv: list[str], names: Iterable[str]) -> bool:
+    option_names = tuple(names)
+    for item in argv:
+        for name in option_names:
+            if item == name or item.startswith(f"{name}="):
+                return True
+    return False
+
+
+def positional_family_supplied(args: argparse.Namespace) -> bool:
+    return len(getattr(args, "positional", [])) >= 3
+
+
+def apply_search_preset(args: argparse.Namespace, raw_argv: list[str]):
+    preset = SEARCH_PRESET_OVERRIDES.get(args.search_preset)
+    if preset is None:
+        return
+
+    if (
+        not option_supplied(raw_argv, ["--families"])
+        and not option_supplied(raw_argv, ["--family"])
+        and not positional_family_supplied(args)
+    ):
+        args.families = preset["families"]
+    if (
+        not option_supplied(raw_argv, ["--passband-offset-values"])
+        and not option_supplied(raw_argv, ["--passband-search-width-values"])
+        and not option_supplied(raw_argv, ["--passband-edge-step-values"])
+    ):
+        args.passband_offset_values = preset["passband_offset_values"]
+    if not option_supplied(raw_argv, ["--stopband-gap-values"]):
+        args.stopband_gap_values = preset["stopband_gap_values"]
+    if not option_supplied(raw_argv, ["--gpass-values"]):
+        args.gpass_values = preset["gpass_values"]
+    if not option_supplied(raw_argv, ["--gstop-values"]):
+        args.gstop_values = preset["gstop_values"]
+    if not option_supplied(raw_argv, ["--top-n"]):
+        args.top_n = max(args.top_n, int(preset["top_n"]))
 
 
 def parse_rank_selection(text: str, candidate_count: int) -> list[int]:
@@ -1327,15 +1726,53 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-freq", type=float, default=DEFAULT_TARGET_FREQ)
     parser.add_argument(
         "--family",
-        choices=["butter", "cheby1", "cheby2", "ellip"],
+        choices=SUPPORTED_FAMILIES,
         default="butter",
         help="IIR設計法.",
     )
+    parser.add_argument(
+        "--search-preset",
+        choices=["standard", "sharp", "exhaustive"],
+        default=DEFAULT_SEARCH_PRESET,
+        help="探索プリセット. sharp/exhaustiveは複数変数を総当たり.",
+    )
+    parser.add_argument(
+        "--bruteforce",
+        dest="search_preset",
+        action="store_const",
+        const="sharp",
+        help="--search-preset sharp と同じ.",
+    )
+    parser.add_argument(
+        "--families",
+        default=DEFAULT_FAMILIES,
+        help="探索するIIR設計法, カンマ区切り. 例: butter,cheby2,ellip",
+    )
     parser.add_argument("--passband-search-width", type=float, default=DEFAULT_PASSBAND_SEARCH_WIDTH)
     parser.add_argument("--passband-edge-step", type=float, default=DEFAULT_PASSBAND_EDGE_STEP)
+    parser.add_argument(
+        "--passband-offset-values",
+        default=DEFAULT_PASSBAND_OFFSET_VALUES,
+        help="targetから通過帯域端までの距離候補[Hz]. 指定時は左右オフセットを総当たり.",
+    )
+    parser.add_argument(
+        "--passband-search-width-values",
+        default=DEFAULT_PASSBAND_SEARCH_WIDTH_VALUES,
+        help="通過帯域候補の探索幅を複数振る候補[Hz], カンマ区切り.",
+    )
+    parser.add_argument(
+        "--passband-edge-step-values",
+        default=DEFAULT_PASSBAND_EDGE_STEP_VALUES,
+        help="通過帯域端刻みを複数振る候補[Hz], カンマ区切り.",
+    )
     parser.add_argument("--stopband-gap-min", type=float, default=DEFAULT_STOPBAND_GAP_MIN)
     parser.add_argument("--stopband-gap-max", type=float, default=DEFAULT_STOPBAND_GAP_MAX)
     parser.add_argument("--stopband-gap-step", type=float, default=DEFAULT_STOPBAND_GAP_STEP)
+    parser.add_argument(
+        "--stopband-gap-values",
+        default=DEFAULT_STOPBAND_GAP_VALUES,
+        help="stopband gap候補[Hz], カンマ区切り. 指定時はmin/max/stepより優先.",
+    )
     parser.add_argument("--gpass-values", default=DEFAULT_GPASS_VALUES)
     parser.add_argument("--gstop-values", default=DEFAULT_GSTOP_VALUES)
     parser.add_argument("--acceptable-gain-db", type=float, default=DEFAULT_ACCEPTABLE_GAIN_DB)
@@ -1345,13 +1782,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_TARGET_GAIN_DB,
         help="target周波数で許容する最大ゲイン[dB]. 0以下で制限なし.",
     )
+    parser.add_argument(
+        "--target-neighborhood-width",
+        type=float,
+        default=DEFAULT_TARGET_NEIGHBORHOOD_WIDTH,
+        help="target周波数周辺ゲインを確認する半幅[Hz]. 0ならtarget一点のみ.",
+    )
+    parser.add_argument(
+        "--max-near-target-gain-db",
+        type=float,
+        default=DEFAULT_MAX_NEAR_TARGET_GAIN_DB,
+        help="target±target-neighborhood-width内で許容する最大ゲイン[dB]. 0以下で制限なし.",
+    )
     parser.add_argument("--max-q", type=float, default=DEFAULT_MAX_Q)
     parser.add_argument(
         "--max-target-delay-ms",
         "--target-delay-ms",
         type=float,
         default=DEFAULT_MAX_TARGET_DELAY_MS,
-        help="target周波数で許容する最大群遅延[ms]. 1なら1ms以下. 0以下で制限なし.",
+        help="target周波数と周辺で許容する最大群遅延[ms]. 1なら1ms以下. 0以下で制限なし.",
+    )
+    parser.add_argument(
+        "--target-delay-neighborhood-width",
+        "--delay-neighborhood-width",
+        type=float,
+        default=DEFAULT_TARGET_DELAY_NEIGHBORHOOD_WIDTH,
+        help="群遅延上限を確認するtarget周波数周辺の半幅[Hz]. 0ならtarget一点のみ.",
+    )
+    parser.add_argument(
+        "--target-delay-neighborhood-points",
+        "--delay-neighborhood-points",
+        type=int,
+        default=DEFAULT_TARGET_DELAY_NEIGHBORHOOD_POINTS,
+        help="target周波数周辺の群遅延を走査する点数.",
     )
     parser.add_argument("--max-pole-abs", type=float, default=DEFAULT_MAX_POLE_ABS)
     parser.add_argument(
@@ -1418,20 +1881,41 @@ def validate_args(args: argparse.Namespace):
         raise ValueError("passband_search_width は正の値")
     if args.passband_edge_step <= 0:
         raise ValueError("passband_edge_step は正の値")
+    for value in parse_optional_float_list(args.passband_offset_values) or []:
+        if value <= 0:
+            raise ValueError("passband_offset_values は正の値")
+    for value in parse_optional_float_list(args.passband_search_width_values) or []:
+        if value <= 0:
+            raise ValueError("passband_search_width_values は正の値")
+    for value in parse_optional_float_list(args.passband_edge_step_values) or []:
+        if value <= 0:
+            raise ValueError("passband_edge_step_values は正の値")
     if args.stopband_gap_min <= 0 or args.stopband_gap_max <= 0:
         raise ValueError("stopband_gap は正の値")
     if args.stopband_gap_min > args.stopband_gap_max:
         raise ValueError("stopband_gap_min は stopband_gap_max 以下")
     if args.stopband_gap_step <= 0:
         raise ValueError("stopband_gap_step は正の値")
+    for value in parse_optional_float_list(args.stopband_gap_values) or []:
+        if value <= 0:
+            raise ValueError("stopband_gap_values は正の値")
+    build_families(args)
     if args.top_n <= 0:
         raise ValueError("top_n は正の整数")
     if not 0 < args.max_pole_abs <= 1:
         raise ValueError("max_pole_abs は 0より大きく1以下")
     if args.max_target_gain_db is not None and args.max_target_gain_db <= 0:
         args.max_target_gain_db = None
+    if args.target_neighborhood_width < 0:
+        raise ValueError("target_neighborhood_width は0以上")
+    if args.max_near_target_gain_db is not None and args.max_near_target_gain_db <= 0:
+        args.max_near_target_gain_db = None
     if args.max_target_delay_ms is not None and args.max_target_delay_ms <= 0:
         args.max_target_delay_ms = None
+    if args.target_delay_neighborhood_width < 0:
+        raise ValueError("target_delay_neighborhood_width は0以上")
+    if args.target_delay_neighborhood_points <= 0:
+        raise ValueError("target_delay_neighborhood_points は正の整数")
     if args.max_direct_form_order <= 0:
         args.max_direct_form_order = None
     if args.detail_rank is not None:
@@ -1447,6 +1931,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         require_scipy_signal()
         apply_positional_args(args)
+        apply_search_preset(args, raw_argv)
         if args.interactive:
             apply_interactive_inputs(args)
         validate_args(args)
