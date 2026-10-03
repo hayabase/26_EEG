@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -68,6 +69,46 @@ def main() -> int:
             time.sleep(INTERVAL_SECONDS)
 
     return last_return_code
+=======
+"""Run the measurement CLI repeatedly, resolving interactive choices once."""
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    from .offline_max2_parallel_measurement import parse_args, resolve_com_port
+    from .device_backends import resolve_device
+except ImportError:
+    from offline_max2_parallel_measurement import parse_args, resolve_com_port
+    from device_backends import resolve_device
+
+RUN_COUNT = 3
+COMMAND = []  # Measurement options may also be configured here.
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Repeat measurement; remaining options pass to measurement.")
+    parser.add_argument("--count", type=int, default=RUN_COUNT)
+    args, options = parser.parse_known_args(argv)
+    if args.count < 1:
+        parser.error("--count must be positive")
+    options = COMMAND + options
+    config = parse_args(options)
+    if config.list_ports:
+        args.count = 1
+    else:
+        device = resolve_device(config.device)
+        port = resolve_com_port(config.com)
+        options += ["--device", device, "--com", port]
+    script = Path(__file__).with_name("offline_max2_parallel_measurement.py")
+    for index in range(args.count):
+        print(f"Run {index + 1}/{args.count}", flush=True)
+        result = subprocess.run([sys.executable, str(script), *options])
+        if result.returncode:
+            return result.returncode
+    return 0
+>>>>>>> 53e9d44 (更新)
 
 
 if __name__ == "__main__":

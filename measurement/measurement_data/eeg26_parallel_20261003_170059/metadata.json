@@ -1,0 +1,148 @@
+{
+  "created_at": "2026-10-03T17:00:59",
+  "script": "offline_max2_parallel_measurement.py",
+  "purpose": "offline_max2_parallel_measurement",
+  "config": {
+    "com_port": "COM4",
+    "baudrate": 115200,
+    "channel_mode": "auto",
+    "pre_fixation_sec": 0.5,
+    "stimulus_sec": 2.0,
+    "stimulus_cycles": null,
+    "post_fixation_sec": 0.5,
+    "refresh_rate_override": null,
+    "fullscreen": false,
+    "monitor_index": 0,
+    "window_width": 640,
+    "window_height": 480,
+    "fixation_radius": 0.025,
+    "fixation_color": [
+      0.45,
+      0.45,
+      0.45
+    ],
+    "stimulus_radius": 0.22,
+    "show_fixation_during_stimulus": false,
+    "run_dir": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059",
+    "serial_timeout_sec": 0.001,
+    "serial_warmup_sec": 1.0,
+    "ready_timeout_sec": 15.0,
+    "make_max2_summary": false,
+    "stimuli": [
+      {
+        "name": "stimulus_center_10_0hz",
+        "frequency_hz": 10.0,
+        "position": [
+          0.0,
+          0.0
+        ],
+        "radius": 0.22,
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "start_on": true
+      }
+    ],
+    "device_type": "eeg26",
+    "sample_rate_hz": 1000
+  },
+  "files": {
+    "metadata_json": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059\\metadata.json",
+    "events_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059\\events.csv",
+    "frames_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059\\frames.csv",
+    "serial_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059\\serial_samples.csv",
+    "max2_summary_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_170059\\max2_summary.csv"
+  },
+  "phase_codes": {
+    "0": "idle",
+    "1": "fixation_before",
+    "2": "stimulus",
+    "3": "fixation_after",
+    "8": "finished"
+  },
+  "device": {
+    "type": "eeg26",
+    "channel_count": 16,
+    "protocol_version": 2,
+    "sample_rate_hz": 1000,
+    "config1_readback": [
+      212,
+      212
+    ],
+    "channel_units": "signed ADC raw count",
+    "timestamp_clock_hz": 1000000
+  },
+  "serial_formats": [
+    "EEG26 binary v2, 68 bytes, 16 signed ADC counts"
+  ],
+  "acquisition": {
+    "received_frames": 2952,
+    "crc_errors": 0,
+    "sequence_gaps": 0,
+    "sequence_gap_events": 0,
+    "discarded_bytes": 0,
+    "partial_frame_bytes": 0,
+    "serial_timeouts": 158,
+    "timestamp_gap_events": 0,
+    "max_sample_interval_us": 1006,
+    "device_duration_s": 2.965134,
+    "stop_acknowledged": true,
+    "firmware_dropped": 9,
+    "commands": [
+      {
+        "command": "STOP",
+        "response": "STOPPED sequence=2926 dropped=9"
+      },
+      {
+        "command": "STATUS",
+        "response": "STATUS state=2 mode=1 sequence=2926 dropped=9 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+      },
+      {
+        "command": "MODE EEG",
+        "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+      },
+      {
+        "command": "RREG 1 01 01",
+        "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+      },
+      {
+        "command": "RREG 2 01 01",
+        "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+      },
+      {
+        "command": "WREG 1 01 D4",
+        "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD4 read=0xD4 MATCH"
+      },
+      {
+        "command": "WREG 2 01 D4",
+        "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD4 read=0xD4 MATCH"
+      },
+      {
+        "command": "RREG 1 01 01",
+        "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD4"
+      },
+      {
+        "command": "RREG 2 01 01",
+        "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD4"
+      },
+      {
+        "command": "FORMAT BINARY",
+        "response": "OK FORMAT BINARY"
+      },
+      {
+        "command": "START",
+        "response": "STARTED EEG"
+      },
+      {
+        "command": "STOP",
+        "response": "STOPPED sequence=2952 dropped=9"
+      }
+    ],
+    "saved_samples": 2952,
+    "duration_s": 2.9633272,
+    "frames_per_second": 996.1775398950207,
+    "error": null
+  }
+}

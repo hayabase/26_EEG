@@ -10,6 +10,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+try:
+    from .serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+except ImportError:
+    from serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_ROOTS = (
@@ -17,7 +22,6 @@ DEFAULT_DATA_ROOTS = (
     REPO_ROOT / "measurement_data",
 )
 SERIAL_CSV_NAME = "serial_samples.csv"
-CHANNEL_NAMES = ("ch1", "ch2", "ch3")
 PHASE_CHOICES = ("all", "idle", "fixation_before", "stimulus", "fixation_after", "finished")
 CHANNEL_COLORS = {
     "ch1": "tab:blue",
@@ -92,6 +96,7 @@ def read_target_frequency_hz(run_dir: Path) -> Optional[float]:
         return None
 
 
+<<<<<<< HEAD
 def parse_channels(text: Optional[str]) -> Tuple[str, ...]:
     if text is None:
         return CHANNEL_NAMES
@@ -133,6 +138,11 @@ def iter_valid_rows(serial_csv: Path, phase: str) -> Iterable[Dict[str, str]]:
                 continue
             if phase != "all" and row.get("phase_name") != phase:
                 continue
+=======
+def iter_valid_rows(serial_csv: Path, phase: str):
+    for row in iter_rows(serial_csv):
+        if phase == "all" or row.get("phase_name") == phase:
+>>>>>>> 53e9d44 (更新)
             yield row
 
 
@@ -171,6 +181,7 @@ def load_channel_series(
     return series
 
 
+<<<<<<< HEAD
 def crop_series_by_time_range(
     series: Dict[str, Tuple[np.ndarray, np.ndarray]],
     time_range: Optional[Tuple[float, float]],
@@ -198,6 +209,9 @@ def crop_series_by_time_range(
 
 
 def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+=======
+def build_uniform_series(time_s: np.ndarray, value: np.ndarray, sample_rate_hz=None) -> Tuple[np.ndarray, np.ndarray, float]:
+>>>>>>> 53e9d44 (更新)
     order = np.argsort(time_s)
     time_s = time_s[order]
     value = value[order]
@@ -212,7 +226,7 @@ def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndar
         raise ValueError("not enough time samples for FFT")
 
     sample_interval_s = float(np.median(positive_dt))
-    sample_rate_hz = 1.0 / sample_interval_s
+    sample_rate_hz = sample_rate_hz or 1.0 / sample_interval_s
     sample_count = int(np.floor((time_s[-1] - time_s[0]) * sample_rate_hz)) + 1
     if sample_count < 2:
         raise ValueError("not enough duration for FFT")
@@ -229,8 +243,9 @@ def compute_fft(
     min_freq_hz: float,
     max_freq_hz: float,
     target_frequency_hz: Optional[float],
+    sample_rate_hz=None,
 ) -> ChannelFft:
-    uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value)
+    uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value, sample_rate_hz)
     centered_value = uniform_value - float(np.mean(uniform_value))
 
     if centered_value.size < 3:
@@ -466,8 +481,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--channels",
         type=parse_channels,
-        default=CHANNEL_NAMES,
-        help="Comma-separated channels, e.g. ch1,ch2 or ch1,ch2,ch3.",
+        default=None,
+        help="Comma-separated channels, e.g. ch1,ch2,ch8,ch16. Omitted: discover CSV header.",
     )
     parser.add_argument("--min-freq", type=float, default=0.5, help="Minimum FFT frequency.")
     parser.add_argument("--max-freq", type=float, default=60.0, help="Maximum FFT frequency.")
@@ -518,6 +533,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     run_dir = resolve_run_dir(args.data_path)
     serial_csv = find_serial_csv(run_dir)
+    args.channels = resolve_channels(serial_csv, args.channels)
     target_frequency_hz = None
     if not args.no_target_marker:
         target_frequency_hz = args.target_freq
@@ -533,7 +549,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     fft_results = [
-        compute_fft(channel, time_s, value, args.min_freq, args.max_freq, target_frequency_hz)
+        compute_fft(channel, time_s, value, args.min_freq, args.max_freq, target_frequency_hz, read_sample_rate(serial_csv))
         for channel, (time_s, value) in series.items()
     ]
     amplitude_reference = fft_amplitude_reference(fft_results, args.min_freq, args.max_freq)

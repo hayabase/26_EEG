@@ -10,6 +10,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+try:
+    from .serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+except ImportError:
+    from serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+
 
 # ===== 初期値設定 =====
 # BPF係数は別プロジェクトで作成した値をここへ入れる.
@@ -71,6 +76,7 @@ DEFAULT_BANDPASS_A = (
     0.995549157346584335,
 )  
 DEFAULT_BANDPASS_B = (
+<<<<<<< HEAD
     4.53499414474683205e-06,
     -1.80988300648415705e-05,
     2.25927475821350346e-05,
@@ -98,6 +104,14 @@ DEFAULT_NOTCH_B = (
 )  # IIRノッチ分子係数b. DEFAULT_NOTCH_Aと同じ設計の係数.
 
 DEFAULT_CHANNELS = ("ch1", "ch2", "ch3")  # 解析する既定チャンネル.
+=======
+    0.000039222815344601606540007877,
+    0.000000000000000000000000000000,
+    -0.000078445630689203213080015753,
+    0.000000000000000000000000000000,
+    0.000039222815344601606540007877,
+)  # IIR分子係数b. DEFAULT_BANDPASS_Aと同じ設計の係数.
+>>>>>>> 53e9d44 (更新)
 DEFAULT_PHASES = ("fixation_before", "stimulus", "fixation_after")  # グラフ化する既定フェイズ.
 DEFAULT_PEAK_MODE = "max"  # 各周期内のピーク検出方法. max, min, abs.
 DEFAULT_FILTER_DELAY_MS = 0.0  # BPFの遅延補正量. 正の値でフィルタ出力を前に戻す.
@@ -217,21 +231,6 @@ def read_metadata(run_dir: Path) -> MetadataInfo:
         start_on = None
 
     return MetadataInfo(frequency_hz=frequency_hz, start_on=start_on)
-
-
-def parse_channels(text: Optional[str]) -> Tuple[str, ...]:
-    if text is None:
-        return DEFAULT_CHANNELS
-
-    channels = tuple(part.strip() for part in text.split(",") if part.strip())
-    invalid = [channel for channel in channels if channel not in DEFAULT_CHANNELS]
-    if invalid:
-        raise argparse.ArgumentTypeError(
-            f"unknown channel: {', '.join(invalid)}. Use ch1,ch2,ch3."
-        )
-    if not channels:
-        raise argparse.ArgumentTypeError("at least one channel is required")
-    return channels
 
 
 def parse_phases(text: Optional[str]) -> Tuple[str, ...]:
@@ -423,13 +422,8 @@ def read_frame_phase_intervals(
     return intervals
 
 
-def iter_valid_rows(serial_csv: Path) -> Iterable[Dict[str, str]]:
-    with open(serial_csv, newline="", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            if row.get("parse_error"):
-                continue
-            yield row
+def iter_valid_rows(serial_csv: Path):
+    yield from iter_rows(serial_csv)
 
 
 def load_channel_series(
@@ -466,7 +460,7 @@ def load_channel_series(
     return series
 
 
-def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+def build_uniform_series(time_s: np.ndarray, value: np.ndarray, sample_rate_hz=None) -> Tuple[np.ndarray, np.ndarray, float]:
     order = np.argsort(time_s)
     time_s = time_s[order]
     value = value[order]
@@ -481,7 +475,7 @@ def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndar
         raise ValueError("not enough time samples")
 
     sample_interval_s = float(np.median(positive_dt))
-    sample_rate_hz = 1.0 / sample_interval_s
+    sample_rate_hz = sample_rate_hz or 1.0 / sample_interval_s
     sample_count = int(np.floor((time_s[-1] - time_s[0]) * sample_rate_hz)) + 1
     if sample_count < 2:
         raise ValueError("not enough duration")
@@ -522,13 +516,17 @@ def build_uniform_channels(
     a: np.ndarray,
     use_filter: bool,
     filter_delay_ms: float,
+<<<<<<< HEAD
     notch_b: Optional[np.ndarray] = None,
     notch_a: Optional[np.ndarray] = None,
     use_notch: bool = False,
+=======
+    sample_rate_hz=None,
+>>>>>>> 53e9d44 (更新)
 ) -> Dict[str, UniformChannel]:
     uniform_channels: Dict[str, UniformChannel] = {}
     for channel, (time_s, value) in series.items():
-        uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value)
+        uniform_time_s, uniform_value, effective_rate = build_uniform_series(time_s, value, sample_rate_hz)
         centered_value = uniform_value - float(np.mean(uniform_value))
         processed_value = centered_value
         if use_notch:
@@ -547,7 +545,7 @@ def build_uniform_channels(
             time_s=uniform_time_s,
             raw=uniform_value,
             filtered=filtered,
-            sample_rate_hz=sample_rate_hz,
+            sample_rate_hz=effective_rate,
         )
     return uniform_channels
 
@@ -840,8 +838,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--channels",
         type=parse_channels,
-        default=DEFAULT_CHANNELS,
-        help="Comma-separated channels, e.g. ch1,ch2 or ch1,ch2,ch3.",
+        default=None,
+        help="Comma-separated channels, e.g. ch1,ch2,ch8,ch16. Omitted: discover CSV header.",
     )
     parser.add_argument(
         "--filter-a",
@@ -906,13 +904,20 @@ def save_directory_from_arg(save_arg: Optional[str], run_dir: Path) -> Optional[
     return Path(save_arg).expanduser()
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Optional[Sequence[str]] = None, series_transform=None) -> int:
     args = parse_args(argv)
     run_dir = resolve_run_dir(args.data_path)
     serial_csv = find_required_file(run_dir, SERIAL_CSV_NAME)
+    args.channels = resolve_channels(serial_csv, args.channels)
     events_csv = find_required_file(run_dir, EVENTS_CSV_NAME)
     frames_csv = find_required_file(run_dir, FRAMES_CSV_NAME)
     metadata = read_metadata(run_dir)
+    verified_rate = read_sample_rate(serial_csv)
+    if (verified_rate is not None and verified_rate != 1000 and not args.no_filter
+            and np.array_equal(args.filter_a, DEFAULT_BANDPASS_A)
+            and np.array_equal(args.filter_b, DEFAULT_BANDPASS_B)):
+        print(f"WARNING: default BPF coefficients were designed for 1000 Hz; this recording is "
+              f"{verified_rate:g} Hz. Use --no-filter or coefficients designed at this rate.")
 
     frequency_hz = args.frequency if args.frequency is not None else metadata.frequency_hz
     if frequency_hz is None:
@@ -939,6 +944,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise RuntimeError(f"No matching phase intervals found for phases={args.phases}")
 
     series = load_channel_series(serial_csv, args.channels)
+    if series_transform is not None:
+        series = series_transform(series, args.channels)
+        args.channels = tuple(series)
     if not series:
         raise RuntimeError("No valid channel data found")
 
@@ -948,9 +956,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         a=args.filter_a,
         use_filter=not args.no_filter,
         filter_delay_ms=args.filter_delay_ms,
+<<<<<<< HEAD
         notch_b=args.notch_b,
         notch_a=args.notch_a,
         use_notch=args.notch,
+=======
+        sample_rate_hz=verified_rate,
+>>>>>>> 53e9d44 (更新)
     )
     amplitude_reference = max_abs_from_arrays(channel.filtered for channel in channels.values())
 

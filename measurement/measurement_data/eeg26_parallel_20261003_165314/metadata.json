@@ -1,0 +1,146 @@
+{
+  "created_at": "2026-10-03T16:53:14",
+  "script": "offline_max2_parallel_measurement.py",
+  "purpose": "offline_max2_parallel_measurement",
+  "config": {
+    "com_port": "COM4",
+    "baudrate": 115200,
+    "channel_mode": "auto",
+    "pre_fixation_sec": 1.0,
+    "stimulus_sec": 3.0,
+    "stimulus_cycles": null,
+    "post_fixation_sec": 1.0,
+    "refresh_rate_override": null,
+    "fullscreen": false,
+    "monitor_index": 0,
+    "window_width": 640,
+    "window_height": 480,
+    "fixation_radius": 0.025,
+    "fixation_color": [
+      0.45,
+      0.45,
+      0.45
+    ],
+    "stimulus_radius": 0.22,
+    "show_fixation_during_stimulus": false,
+    "run_dir": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314",
+    "serial_timeout_sec": 0.001,
+    "serial_warmup_sec": 1.0,
+    "ready_timeout_sec": 15.0,
+    "make_max2_summary": false,
+    "stimuli": [
+      {
+        "name": "stimulus_center_10_0hz",
+        "frequency_hz": 10.0,
+        "position": [
+          0.0,
+          0.0
+        ],
+        "radius": 0.22,
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "start_on": true
+      }
+    ],
+    "device_type": "eeg26",
+    "sample_rate_hz": 1000
+  },
+  "files": {
+    "metadata_json": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314\\metadata.json",
+    "events_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314\\events.csv",
+    "frames_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314\\frames.csv",
+    "serial_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314\\serial_samples.csv",
+    "max2_summary_csv": "C:\\Users\\g2110\\Documents\\EEG\\26_EEG\\measurement\\measurement_data\\eeg26_parallel_20261003_165314\\max2_summary.csv"
+  },
+  "phase_codes": {
+    "0": "idle",
+    "1": "fixation_before",
+    "2": "stimulus",
+    "3": "fixation_after",
+    "8": "finished"
+  },
+  "device": {
+    "type": "eeg26",
+    "channel_count": 16,
+    "protocol_version": 2,
+    "sample_rate_hz": 1000,
+    "config1_readback": [
+      212,
+      212
+    ],
+    "channel_units": "signed ADC raw count",
+    "timestamp_clock_hz": 1000000
+  },
+  "serial_formats": [
+    "ch1",
+    "ch1,ch2,ch3"
+  ],
+  "acquisition": {
+    "received_frames": 4957,
+    "crc_errors": 0,
+    "sequence_gaps": 0,
+    "sequence_gap_events": 0,
+    "discarded_bytes": 0,
+    "partial_frame_bytes": 0,
+    "serial_timeouts": 284,
+    "stop_acknowledged": true,
+    "firmware_dropped": 9,
+    "commands": [
+      {
+        "command": "STOP",
+        "response": "STOPPED sequence=0 dropped=0"
+      },
+      {
+        "command": "STATUS",
+        "response": "STATUS state=1 mode=0 sequence=0 dropped=0 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+      },
+      {
+        "command": "MODE EEG",
+        "response": "Send register changes if needed, then START."
+      },
+      {
+        "command": "RREG 1 01 01",
+        "response": "[0x01] = 0xD6"
+      },
+      {
+        "command": "RREG 2 01 01",
+        "response": "[0x01] = 0xD6"
+      },
+      {
+        "command": "WREG 1 01 D4",
+        "response": "[0x01] wrote=0xD4 read=0xD4 MATCH"
+      },
+      {
+        "command": "WREG 2 01 D4",
+        "response": "[0x01] wrote=0xD4 read=0xD4 MATCH"
+      },
+      {
+        "command": "RREG 1 01 01",
+        "response": "[0x01] = 0xD4"
+      },
+      {
+        "command": "RREG 2 01 01",
+        "response": "[0x01] = 0xD4"
+      },
+      {
+        "command": "FORMAT BINARY",
+        "response": "OK FORMAT BINARY"
+      },
+      {
+        "command": "START",
+        "response": "STARTED EEG"
+      },
+      {
+        "command": "STOP",
+        "response": "STOPPED sequence=4957 dropped=9"
+      }
+    ],
+    "saved_samples": 4957,
+    "duration_s": 4.9686393,
+    "frames_per_second": 997.6574471807603,
+    "error": null
+  }
+}

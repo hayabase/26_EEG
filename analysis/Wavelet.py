@@ -10,6 +10,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+try:
+    from .serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+except ImportError:
+    from serial_data import parse_channels, resolve_channels, iter_rows, read_sample_rate
+
 
 # ===== 初期値設定 =====
 # IIRノッチ係数. design_iir_notch_filter.py で作成した値をここへ入れる.
@@ -35,7 +40,6 @@ DEFAULT_DATA_ROOTS = (
     REPO_ROOT / "measurement_data",
 )
 SERIAL_CSV_NAME = "serial_samples.csv"
-CHANNEL_NAMES = ("ch1", "ch2", "ch3")
 PHASE_CHOICES = ("all", "idle", "fixation_before", "stimulus", "fixation_after", "finished")
 CHANNEL_COLORS = {
     "ch1": "tab:blue",
@@ -111,6 +115,7 @@ def read_target_frequency_hz(run_dir: Path) -> Optional[float]:
         return None
 
 
+<<<<<<< HEAD
 def parse_channels(text: Optional[str]) -> Tuple[str, ...]:
     if text is None:
         return CHANNEL_NAMES
@@ -156,6 +161,11 @@ def iter_valid_rows(serial_csv: Path, phase: str) -> Iterable[Dict[str, str]]:
                 continue
             if phase != "all" and row.get("phase_name") != phase:
                 continue
+=======
+def iter_valid_rows(serial_csv: Path, phase: str):
+    for row in iter_rows(serial_csv):
+        if phase == "all" or row.get("phase_name") == phase:
+>>>>>>> 53e9d44 (更新)
             yield row
 
 
@@ -194,7 +204,7 @@ def load_channel_series(
     return series
 
 
-def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+def build_uniform_series(time_s: np.ndarray, value: np.ndarray, sample_rate_hz=None) -> Tuple[np.ndarray, np.ndarray, float]:
     order = np.argsort(time_s)
     time_s = time_s[order]
     value = value[order]
@@ -209,7 +219,7 @@ def build_uniform_series(time_s: np.ndarray, value: np.ndarray) -> Tuple[np.ndar
         raise ValueError("not enough time samples for wavelet transform")
 
     sample_interval_s = float(np.median(positive_dt))
-    sample_rate_hz = 1.0 / sample_interval_s
+    sample_rate_hz = sample_rate_hz or 1.0 / sample_interval_s
     sample_count = int(np.floor((time_s[-1] - time_s[0]) * sample_rate_hz)) + 1
     if sample_count < 2:
         raise ValueError("not enough duration for wavelet transform")
@@ -292,11 +302,15 @@ def compute_wavelet(
     support_sigma: float,
     edge_ignore_sec: float,
     target_frequency_hz: Optional[float],
+<<<<<<< HEAD
     notch_b: np.ndarray,
     notch_a: np.ndarray,
     use_notch: bool,
+=======
+    sample_rate_hz=None,
+>>>>>>> 53e9d44 (更新)
 ) -> ChannelWavelet:
-    uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value)
+    uniform_time_s, uniform_value, sample_rate_hz = build_uniform_series(time_s, value, sample_rate_hz)
     centered_value = uniform_value - float(np.mean(uniform_value))
     analysis_value = centered_value
     if use_notch:
@@ -563,8 +577,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--channels",
         type=parse_channels,
-        default=CHANNEL_NAMES,
-        help="Comma-separated channels, e.g. ch1,ch2 or ch1,ch2,ch3.",
+        default=None,
+        help="Comma-separated channels, e.g. ch1,ch2,ch8,ch16. Omitted: discover CSV header.",
     )
     parser.add_argument("--min-freq", type=float, default=2.0, help="Minimum wavelet frequency.")
     parser.add_argument("--max-freq", type=float, default=45.0, help="Maximum wavelet frequency.")
@@ -679,6 +693,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     run_dir = resolve_run_dir(args.data_path)
     serial_csv = find_serial_csv(run_dir)
+    args.channels = resolve_channels(serial_csv, args.channels)
     target_frequency_hz = None
     if not args.no_target_marker:
         target_frequency_hz = args.target_freq
@@ -705,9 +720,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             support_sigma=args.support_sigma,
             edge_ignore_sec=args.edge_ignore_sec,
             target_frequency_hz=target_frequency_hz,
+<<<<<<< HEAD
             notch_b=args.notch_b,
             notch_a=args.notch_a,
             use_notch=args.notch,
+=======
+            sample_rate_hz=read_sample_rate(serial_csv),
+>>>>>>> 53e9d44 (更新)
         )
         for channel, (time_s, value) in series.items()
     ]

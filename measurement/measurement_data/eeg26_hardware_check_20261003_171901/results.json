@@ -1,0 +1,961 @@
+[
+  {
+    "requested_rate_hz": 250,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 250,
+      "config1_readback": [
+        214,
+        214
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.0024701000074856,
+    "frames_per_second": 248.12903215860254,
+    "channel_min": [
+      159117,
+      158698,
+      160498,
+      162423,
+      1362723,
+      813808,
+      1388439,
+      421529,
+      123073,
+      122286,
+      125322,
+      125324,
+      1204648,
+      1190734,
+      1668407,
+      957479
+    ],
+    "channel_max": [
+      223315,
+      223995,
+      228574,
+      231483,
+      1372511,
+      824328,
+      1400319,
+      461599,
+      185754,
+      186036,
+      189252,
+      189726,
+      1217543,
+      1200288,
+      1680049,
+      968904
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 745,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 250,
+      "timestamp_gap_events": 0,
+      "max_sample_interval_us": 4021,
+      "device_duration_s": 2.990473,
+      "stop_acknowledged": true,
+      "firmware_dropped": 2,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=9946 dropped=9"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=9946 dropped=9 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D6",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD6 read=0xD6 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D6",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD6 read=0xD6 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=745 dropped=2"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 500,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 500,
+      "config1_readback": [
+        213,
+        213
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.010588099990855,
+    "frames_per_second": 497.5772009477319,
+    "channel_min": [
+      158826,
+      158382,
+      160239,
+      162154,
+      1383544,
+      835336,
+      1413071,
+      422543,
+      122891,
+      122091,
+      125135,
+      125155,
+      1228410,
+      1215836,
+      1691349,
+      981660
+    ],
+    "channel_max": [
+      270639,
+      230058,
+      232669,
+      233468,
+      1398541,
+      851869,
+      1430353,
+      465174,
+      181984,
+      183260,
+      184993,
+      184823,
+      1246479,
+      1230141,
+      1706621,
+      999001
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 1498,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 216,
+      "timestamp_gap_events": 0,
+      "max_sample_interval_us": 2011,
+      "device_duration_s": 3.008204,
+      "stop_acknowledged": true,
+      "firmware_dropped": 4,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=745 dropped=2"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=745 dropped=2 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D5",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD5 read=0xD5 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D5",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD5 read=0xD5 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD5"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD5"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=1498 dropped=4"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 1000,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 1000,
+      "config1_readback": [
+        212,
+        212
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.0013221000117483,
+    "frames_per_second": 995.8944426485581,
+    "channel_min": [
+      158762,
+      158346,
+      160187,
+      162106,
+      1400970,
+      852312,
+      1434026,
+      422918,
+      122809,
+      122006,
+      125068,
+      125079,
+      1246193,
+      1234743,
+      1709316,
+      1000021
+    ],
+    "channel_max": [
+      240413,
+      241338,
+      263889,
+      312558,
+      1419278,
+      872371,
+      1454135,
+      467260,
+      182030,
+      183439,
+      184919,
+      185014,
+      1267353,
+      1252779,
+      1727446,
+      1021099
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 2989,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 218,
+      "timestamp_gap_events": 0,
+      "max_sample_interval_us": 1006,
+      "device_duration_s": 3.002331,
+      "stop_acknowledged": true,
+      "firmware_dropped": 9,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=1498 dropped=4"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=1498 dropped=4 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D4",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD4 read=0xD4 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D4",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD4 read=0xD4 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD4"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD4"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=2989 dropped=9"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 2000,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 2000,
+      "config1_readback": [
+        211,
+        211
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.000319799990393,
+    "frames_per_second": 1992.787568851542,
+    "channel_min": [
+      158446,
+      -524288,
+      29504,
+      161839,
+      -6258213,
+      -8348860,
+      -6112338,
+      422710,
+      122458,
+      121683,
+      124781,
+      124786,
+      1261006,
+      1250197,
+      1724963,
+      1015417
+    ],
+    "channel_max": [
+      241014,
+      242041,
+      265651,
+      4224079,
+      1434089,
+      888118,
+      1473114,
+      4305228,
+      183599,
+      185296,
+      187279,
+      186981,
+      1285264,
+      1271259,
+      1745598,
+      1038984
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 5979,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 173,
+      "timestamp_gap_events": 1,
+      "max_sample_interval_us": 1005,
+      "device_duration_s": 3.004099,
+      "stop_acknowledged": true,
+      "firmware_dropped": 18,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=2989 dropped=9"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=2989 dropped=9 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D3",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD3 read=0xD3 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D3",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD3 read=0xD3 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD3"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD3"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=5979 dropped=18"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 4000,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 4000,
+      "config1_readback": [
+        210,
+        210
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.0011661000025924,
+    "frames_per_second": 3986.783670517158,
+    "channel_min": [
+      158276,
+      157958,
+      159804,
+      161714,
+      1422008,
+      872655,
+      1461913,
+      422251,
+      122344,
+      121595,
+      124613,
+      124661,
+      1272775,
+      1263072,
+      1738161,
+      1027339
+    ],
+    "channel_max": [
+      267885,
+      229644,
+      232270,
+      232980,
+      1445331,
+      899096,
+      1487703,
+      466924,
+      182783,
+      184334,
+      186108,
+      185648,
+      1299018,
+      1285905,
+      1760419,
+      1053707
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 11965,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 133,
+      "timestamp_gap_events": 0,
+      "max_sample_interval_us": 252,
+      "device_duration_s": 3.005244,
+      "stop_acknowledged": true,
+      "firmware_dropped": 37,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=5979 dropped=18"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=5979 dropped=18 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D2",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD2 read=0xD2 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D2",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD2 read=0xD2 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD2"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD2"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=11965 dropped=37"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 8000,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 8000,
+      "config1_readback": [
+        209,
+        209
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.000436599992099,
+    "frames_per_second": 7975.505964719606,
+    "channel_min": [
+      158296,
+      157894,
+      159748,
+      161691,
+      1428838,
+      878718,
+      1471648,
+      421885,
+      122337,
+      121616,
+      124641,
+      124625,
+      1281857,
+      1273551,
+      1749085,
+      1036743
+    ],
+    "channel_max": [
+      239209,
+      240281,
+      257098,
+      317401,
+      1453773,
+      906030,
+      1499063,
+      466726,
+      183891,
+      185698,
+      187616,
+      187296,
+      1309999,
+      1298081,
+      1773248,
+      1064908
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 23930,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 57,
+      "timestamp_gap_events": 0,
+      "max_sample_interval_us": 152,
+      "device_duration_s": 3.005365,
+      "stop_acknowledged": true,
+      "firmware_dropped": 73,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=11965 dropped=37"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=11965 dropped=37 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D1",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD1 read=0xD1 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D1",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD1 read=0xD1 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD1"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD1"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=23930 dropped=73"
+        }
+      ]
+    }
+  },
+  {
+    "requested_rate_hz": 16000,
+    "device": {
+      "type": "eeg26",
+      "channel_count": 16,
+      "protocol_version": 2,
+      "sample_rate_hz": 16000,
+      "config1_readback": [
+        208,
+        208
+      ],
+      "configuration_source": "pc",
+      "channel_units": "signed ADC raw count",
+      "timestamp_clock_hz": 1000000
+    },
+    "elapsed_s": 3.0001622999989195,
+    "frames_per_second": 8013.899781358048,
+    "channel_min": [
+      -4194304,
+      -7994133,
+      -8378327,
+      -8388608,
+      -8388608,
+      -8388608,
+      -8388608,
+      -8388608,
+      -4194304,
+      -8388608,
+      -8388608,
+      -8386690,
+      -8388608,
+      -8388608,
+      -8388116,
+      -8388608
+    ],
+    "channel_max": [
+      8372224,
+      8372224,
+      7417090,
+      8372224,
+      8372224,
+      8372224,
+      8257702,
+      8333830,
+      4177920,
+      8372224,
+      8372224,
+      8373120,
+      8374280,
+      8376350,
+      8377108,
+      8380733
+    ],
+    "channel_saturated_samples": [
+      0,
+      0,
+      0,
+      1,
+      7,
+      1,
+      2,
+      1,
+      0,
+      12,
+      138,
+      0,
+      5,
+      5,
+      0,
+      958
+    ],
+    "error": null,
+    "statistics": {
+      "received_frames": 24043,
+      "crc_errors": 0,
+      "sequence_gaps": 0,
+      "sequence_gap_events": 0,
+      "discarded_bytes": 0,
+      "partial_frame_bytes": 0,
+      "serial_timeouts": 61,
+      "timestamp_gap_events": 23719,
+      "max_sample_interval_us": 201,
+      "device_duration_s": 3.005696,
+      "stop_acknowledged": true,
+      "firmware_dropped": 3705,
+      "commands": [
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=23930 dropped=73"
+        },
+        {
+          "command": "STATUS",
+          "response": "STATUS state=2 mode=1 sequence=23930 dropped=73 drdy1=1 drdy2=1 timebase=1000000Hz protocol=2"
+        },
+        {
+          "command": "MODE EEG",
+          "response": "Configuring EEG mode...\r\nOK configuration readback MATCH (device1 bias=ON, device2 bias=OFF)\r\nRREG device=1 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xEC\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0xFF\r\n  [0x0E] = 0xFF\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nRREG device=2 addr=0x00 count=24\r\n  [0x00] = 0x3E\r\n  [0x01] = 0xD6\r\n  [0x02] = 0xC0\r\n  [0x03] = 0xE8\r\n  [0x04] = 0x00\r\n  [0x05] = 0x60\r\n  [0x06] = 0x60\r\n  [0x07] = 0x60\r\n  [0x08] = 0x60\r\n  [0x09] = 0x60\r\n  [0x0A] = 0x60\r\n  [0x0B] = 0x60\r\n  [0x0C] = 0x60\r\n  [0x0D] = 0x00\r\n  [0x0E] = 0x00\r\n  [0x0F] = 0x00\r\n  [0x10] = 0x00\r\n  [0x11] = 0x00\r\n  [0x12] = 0x00\r\n  [0x13] = 0x00\r\n  [0x14] = 0x00\r\n  [0x15] = 0x20\r\n  [0x16] = 0x00\r\n  [0x17] = 0x00\r\nSend register changes if needed, then START."
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD6"
+        },
+        {
+          "command": "WREG 1 01 D0",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=1 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD0 read=0xD0 MATCH"
+        },
+        {
+          "command": "WREG 2 01 D0",
+          "response": "CONFIG1 DAISY_EN forced=1 (multiple readback)\r\nWREG device=2 addr=0x01 count=1 result=MATCH\r\n  [0x01] wrote=0xD0 read=0xD0 MATCH"
+        },
+        {
+          "command": "RREG 1 01 01",
+          "response": "RREG device=1 addr=0x01 count=1\r\n  [0x01] = 0xD0"
+        },
+        {
+          "command": "RREG 2 01 01",
+          "response": "RREG device=2 addr=0x01 count=1\r\n  [0x01] = 0xD0"
+        },
+        {
+          "command": "FORMAT BINARY",
+          "response": "OK FORMAT BINARY"
+        },
+        {
+          "command": "START",
+          "response": "STARTED EEG"
+        },
+        {
+          "command": "STOP",
+          "response": "STOPPED sequence=24043 dropped=3705"
+        }
+      ]
+    }
+  }
+]

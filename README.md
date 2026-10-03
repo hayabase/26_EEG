@@ -1,6 +1,6 @@
 # 26_EEG
 
-MAX2/EEGの計測, 解析, フィルタ設計をまとめた作業用プロジェクト.
+旧装置（Legacy EEG/MAX2）と新型EEG26の計測, 解析, フィルタ設計をまとめた作業用プロジェクト.
 
 このREADMEはプロジェクト全体の入口. 詳細な説明は各フォルダのREADMEを参照.
 
@@ -298,3 +298,128 @@ python filter_design\check_filter.py --json filter_design\peak_10hz.json
 python analysis\PhaseTiming.py max2_parallel_20260520_185539
 python analysis\PhaseTiming_ch1_minus_ch2.py max2_parallel_20260520_185539 --notch on
 ```
+
+## 新旧EEG装置の選択
+
+`--device` を省略すると装置を番号で選択し、続いて従来のCOM選択を行います。
+`--device` と `--com COM4` を両方指定すれば対話なしで実行できます。
+`--list-ports` は装置選択なしで一覧だけ表示します。
+
+### 旧装置
+
+```powershell
+python measurement\offline_max2_parallel_measurement.py --device legacy
+python measurement\offline_max2_parallel_measurement.py --device legacy --com COM3
+```
+
+旧装置は従来の115200 baud、`readline()`、1ch/3ch判定、ウォームアップを維持します。
+`--channel-mode auto|one|three`、既存CLI、`max2_parallel_...` のフォルダ名、CSVの列順、
+`max2_summary.csv` の作成は従来どおりです。`--baudrate` は引き続き使用でき、`--baud` も同じ意味です。
+旧装置には新型のコマンドを送信しません。旧データにmetadataのdevice情報がなくても解析できます。
+
+### 新型装置（STM32H743 + ADS1299×2、16ch）
+
+```powershell
+python measurement\offline_max2_parallel_measurement.py --device eeg26
+python measurement\offline_max2_parallel_measurement.py --device eeg26 --com COM4
+python measurement\offline_max2_parallel_measurement.py --device eeg26 --com COM4 --sample-rate 1000
+```
+
+COM番号は環境によって異なります。USB CDCなのでbaud設定は実際のUSB転送速度を決めません。
+受信は `measurement/device_backends.py` のバックエンドに分離し、刺激表示・共有PC時刻・
+`events.csv`・`frames.csv` は両装置で共通です。新型は次の順に応答を確認します。
+
+```text
+STOP → STATUS（protocol=2、timebase=1000000Hz）→ MODE EEG
+→ RREG 1/2 01 01
+→ PC設定値をWREG 1/2 01 <CONFIG1>で必ず送信
+→ RREG 1/2 01 01（両ADSの設定確認）→ FORMAT BINARY
+→ 刺激プロセス開始通知を待つ → START → 取得 → STOP → COM close
+```
+
+`ERR`、`ERROR`、`MISMATCH`、応答timeout、読み戻しの不一致があれば開始しません。
+例外・ESC・ウィンドウcloseでも終了処理からSTOPを送信します。切断等で応答が得られなかった場合は
+metadataに失敗を記録し、ポートを閉じます。強制終了が必要な場合もポートを再度開いてSTOPを試みます。
+ファームウェア書き換えは行いません。
+
+### サンプリング周波数
+
+現行Cソースの `MODE EEG` 既定CONFIG1は `0xD6`（250 SPS）です。
+`--sample-rate` 省略時もPC側の既定250 SPSを明示的に送信します。既定値は
+`measurement/device_backends.py` の `DEFAULT_EEG26_SAMPLE_RATE_HZ` にまとめています。
+CLI指定値またはPC既定値からCONFIG1のDRビットを決定し、クロック等の上位ビットを保持して
+毎回WREGで設定します。両ADSの読み戻しがPC要求値と一致した後の値だけを
+`device.sample_rate_hz` に保存し、設定元を `device.configuration_source = pc` と記録します。
+`MODE EEG` は現行STM32が必要とする初期化として先に実行し、その後PCのsample rate設定で上書きします。
+新型装置の動作保証範囲の上限は8000 Hzです。指定可能値は250、500、1000、2000、4000、8000 SPSです。
+16000 SPSは対応範囲外のため、CLIとバックエンドの両方で拒否します。
+実機の各3秒試験では250〜8000 SPSの設定・全16ch取得を確認しましたが、装置内droppedは残っています。
+16000 SPSは実測約8014 frame/sとなり、欠落・飽和が多いため正常取得として使用できません。
+長時間・欠落なし動作は未検証です。最新結果は [EEG26_HARDWARE_RETEST.md](EEG26_HARDWARE_RETEST.md) を参照してください。旧装置のsample rateはPCから変更せず、metadataではunknown（null）とします。
+
+PhaseTimingの既定BPF係数は1000 Hz用です。既存の係数を使用する場合は `--sample-rate 1000` を指定してください。
+250 SPS等では `--no-filter` またはその周波数で設計した `--filter-a` / `--filter-b` を使用してください。
+異なるsample rateで既定係数を使うと警告を表示します。
+
+### バイナリ仕様・品質監視
+
+現行Cソースと実機を基準としたprotocol v2を使用します。過去のEvaluation Pythonにはv1前提が残っています。
+
+| byte | 内容 |
+| :--- | :--- |
+| 0–1 | Sync `A5 5A` |
+| 2–3 | version `02`、ADS payload length `36`（54 byte） |
+| 4–7 | uint32 LE sequence |
+| 8–11 | uint32 LE DRDY device timestamp（1 µs単位） |
+| 12–65 | ADS1/ADS2各27 byte：3 byte status + 8ch signed 24-bit BE |
+| 66–67 | CRC-16/CCITT-FALSE、BE（byte 0–65が対象） |
+
+内部bufferで分割・連結・garbageを処理します。CRC失敗時は1 byte進めてsyncを再探索します。
+CRCを通った未知version/不正payload長は明示的にエラーにします。sequenceとtimestampはuint32 wrapに対応します。
+重複・巻き戻りはエラーです。3秒間有効フレームがない場合も中止します。
+
+終了時に `received frames`、`CRC errors`、`Sequence gaps`、`firmware dropped`、timestamp gapイベントを表示します。
+集計はmetadataの `acquisition` に保存します。`sequence_gaps` は欠番数、`sequence_gap_events` は欠番イベント数です。
+**CRC=0・sequence gap=0だけで取得欠落なしとは判断できません。** 現行STM32はDRDY取りこぼし時に
+sequenceを進めないため、`STOPPED ... dropped=...` とtimestamp間隔も確認してください。
+`timestamp_gap_events` は公称sample間隔の1.5倍を超えたイベント数です。
+空read（通常のserial timeout）自体はCRCエラーではありません。CRC不正フレームはCSVに有効sampleとして保存しません。
+
+### 新型の出力と時刻
+
+新型の保存先は `measurement/measurement_data/eeg26_parallel_YYYYMMDD_HHMMSS/` です。
+`metadata.json`、`events.csv`、`frames.csv`、`serial_samples.csv` を保存します。
+新型では旧装置用のextrema集計 `max2_summary.csv` を作成せず、metadataのacquisitionを集計として使用します。
+
+新型CSVは共通の `sample_index, pc_time_ns, experiment_time_s, phase_code, phase_name, frame_index,
+frame_time_ns, stimulus_active, stimulus_on_mask` に続き、`serial_channel_count, sequence, device_time_us,
+device_time_unwrapped_us, protocol_version, ch1...ch16, crc_ok, sequence_gap, parse_error` を保存します。
+全chはsigned ADC raw countで、µVへの置換は行いません。
+
+PCの `perf_counter_ns()` と刺激の同期処理は維持しています。`device_time_us` は別の時計です。
+`device_time_unwrapped_us` は32-bit wrapを延長した値であり、PC絶対時刻ではありません。
+新型解析では最初のPC受信時刻を起点にDRDYの時刻間隔を使い、metadataで確認されたsample rateで再サンプリングします。
+USBまとめ受信のPC時刻からsample rateを推定しません。起点にはUSB遅延の不確定なoffsetが残ります。
+欠落区間も既存の再サンプリング処理で線形補間されるため、解析前に取得品質を確認してください。
+ハードウェア同期の検証には別のトリガやフォトセンサが必要です。
+
+### 16ch解析とrepeat
+
+CSV headerから利用可能なchを番号順に自動検出します。未指定時は全ch、指定時は指定chを解析します。
+CSVに存在しないchは明示的にエラーとします。フォルダ名には依存しません。
+
+```powershell
+python analysis\FFT.py eeg26_parallel_YYYYMMDD_HHMMSS --channels ch1,ch2,ch8,ch16 --no-show
+python analysis\Wavelet.py eeg26_parallel_YYYYMMDD_HHMMSS --channels ch1,ch2,ch8,ch16 --no-show
+python analysis\PhaseTiming.py eeg26_parallel_YYYYMMDD_HHMMSS --channels ch1,ch2,ch8,ch16 --no-filter --no-show
+python analysis\PhaseTiming_ch1_minus_ch2.py eeg26_parallel_YYYYMMDD_HHMMSS --no-filter --no-show
+python analysis\PhaseTiming_ch1_minus_ch2.py eeg26_parallel_YYYYMMDD_HHMMSS --channels ch8,ch16 --no-filter --no-show
+python measurement\repeat.py --count 3 --device legacy --com COM3
+python measurement\repeat.py --count 3 --device eeg26 --com COM4 --sample-rate 1000
+python -m unittest discover -s tests -v
+```
+
+このチェックアウトには元の `repeat.py` と差分用PhaseTimingがなかったため追加しました。
+`repeat.py` は引数なしでも実行でき、冒頭の `RUN_COUNT` と `COMMAND`（計測オプションのリスト）を編集できます。
+装置・COM選択は最初の一度だけ行い、各回の失敗時には後続計測を中止します。
+実機結果と残る制限は [EEG26_VALIDATION.md](EEG26_VALIDATION.md) を参照してください。

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -302,6 +303,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             show=not args.no_show,
         )
     return 0
+=======
+"""PhaseTiming of a channel difference; --channels selects exactly two inputs."""
+import sys
+import numpy as np
+
+try:
+    from .PhaseTiming import main as phase_main
+except ImportError:
+    from PhaseTiming import main as phase_main
+
+
+def difference(series, channels):
+    if len(channels) != 2 or any(c not in series for c in channels):
+        raise ValueError("Difference analysis requires two available channels (--channels ch1,ch2)")
+    t1, v1 = series[channels[0]]
+    t2, v2 = series[channels[1]]
+    valid = (t1 >= t2[0]) & (t1 <= t2[-1])
+    return {f"{channels[0]}_minus_{channels[1]}":
+            (t1[valid], v1[valid] - np.interp(t1[valid], t2, v2))}
+
+
+def main(argv=None):
+    options = list(sys.argv[1:] if argv is None else argv)
+    if not any(arg == "--channels" or arg.startswith("--channels=") for arg in options):
+        options += ["--channels", "ch1,ch2"]
+    return phase_main(options, series_transform=difference)
+>>>>>>> 53e9d44 (更新)
 
 
 if __name__ == "__main__":

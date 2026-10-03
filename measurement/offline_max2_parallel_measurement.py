@@ -15,6 +15,11 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+try:
+    from .device_backends import BACKENDS, RATE_CODES, DEFAULT_EEG26_SAMPLE_RATE_HZ, parse_serial_line, resolve_device
+except ImportError:
+    from device_backends import BACKENDS, RATE_CODES, DEFAULT_EEG26_SAMPLE_RATE_HZ, parse_serial_line, resolve_device
+
 
 # ===== 初期値設定 =====
 # ここを書き換えると, コマンドラインで指定しない場合の値を変更可能.
@@ -111,6 +116,8 @@ class ExperimentConfig:
     ready_timeout_sec: float
     make_max2_summary: bool
     stimuli: Tuple[StimulusSpec, ...]
+    device_type: str = "legacy"
+    sample_rate_hz: Optional[int] = None
 
 
 @dataclass
@@ -226,160 +233,93 @@ def resolve_com_port(com_arg: Optional[str]) -> str:
     return str(ports[selected_index - 1].device)
 
 
-def parse_serial_line(raw_line: bytes, channel_mode: str) -> Tuple[List[Optional[float]], int, str]:
-    text = raw_line.decode("utf-8", errors="replace").strip()
-    if not text:
-        raise ValueError("empty line")
-
-    parts = [part.strip() for part in text.split(",")]
-    if channel_mode == "one":
-        parts = parts[:1]
-    elif channel_mode == "three":
-        if len(parts) < 3:
-            raise ValueError(f"expected 3 channels, got {len(parts)}")
-        parts = parts[:3]
-    elif channel_mode == "auto":
-        if len(parts) >= 3:
-            parts = parts[:3]
-        elif len(parts) == 1:
-            parts = parts[:1]
-        else:
-            raise ValueError(f"expected 1 or 3 channels, got {len(parts)}")
-    else:
-        raise ValueError(f"unknown channel mode: {channel_mode}")
-
-    values = [float(part) for part in parts]
-    channel_count = len(values)
-    while len(values) < 3:
-        values.append(None)
-    return values, channel_count, text
+def update_device_metadata(files, backend, statistics=None):
+    path = Path(files.metadata_json)
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    metadata["device"] = backend.device_info()
+    if statistics is not None:
+        metadata["acquisition"] = statistics
+    path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def serial_worker(config: ExperimentConfig, shared: SharedState, files: RunFiles, error_queue: Any) -> None:
     set_realtime_priority("serial")
-
+    backend = None
+    sample_index = 0
+    started_ns = None
+    failure = None
     try:
         import serial
-    except Exception as exc:
-        error_queue.put(f"pyserial import failed: {exc}")
-        shared.serial_ready_event.set()
-        return
-
-    try:
-        with serial.Serial(
-            config.com_port,
-            config.baudrate,
-            timeout=config.serial_timeout_sec,
-        ) as ser:
-            try:
-                ser.reset_input_buffer()
-            except Exception:
-                pass
-
-            if config.serial_warmup_sec > 0.0:
-                print(f"serial warmup: discarding data for {config.serial_warmup_sec:.3f} sec")
-                warmup_end_ns = time.perf_counter_ns() + int(
-                    config.serial_warmup_sec * 1_000_000_000
-                )
-                while time.perf_counter_ns() < warmup_end_ns and not shared.stop_event.is_set():
-                    ser.readline()
-                try:
-                    ser.reset_input_buffer()
-                except Exception:
-                    pass
-                if shared.stop_event.is_set():
-                    shared.serial_ready_event.set()
-                    return
-
-            shared.serial_ready_event.set()
-            if not shared.start_event.wait(timeout=120.0):
-                error_queue.put("serial worker timed out waiting for visual start")
-                return
-
-            sample_index = 0
-            one_sec_start_ns = time.perf_counter_ns()
-            one_sec_count = 0
-
+        with serial.Serial(config.com_port, config.baudrate,
+                           timeout=config.serial_timeout_sec, write_timeout=1.0) as ser:
+            backend = BACKENDS[config.device_type](ser, config)
             with open(files.serial_csv, "w", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file)
-                writer.writerow(
-                    [
-                        "sample_index",
-                        "pc_time_ns",
-                        "experiment_time_s",
-                        "phase_code",
-                        "phase_name",
-                        "frame_index",
-                        "frame_time_ns",
-                        "stimulus_active",
-                        "stimulus_on_mask",
-                        "serial_channel_count",
-                        "ch1",
-                        "ch2",
-                        "ch3",
-                        "parse_error",
-                        "raw_line",
-                    ]
-                )
+                writer.writerow(["sample_index", "pc_time_ns", "experiment_time_s", "phase_code",
+                                 "phase_name", "frame_index", "frame_time_ns", "stimulus_active",
+                                 "stimulus_on_mask", *backend.csv_fields])
 
-                while not shared.stop_event.is_set():
-                    raw_line = ser.readline()
-                    now_ns = time.perf_counter_ns()
-                    if not raw_line:
-                        continue
+                def save(samples):
+                    nonlocal sample_index
+                    for now_ns, fields in samples:
+                        phase_code = int(shared.phase_code.value)
+                        visual_start_ns = int(shared.visual_start_ns.value)
+                        elapsed = ((now_ns - visual_start_ns) / 1e9 if visual_start_ns > 0 else "")
+                        writer.writerow([sample_index, now_ns, elapsed, phase_code, phase_name(phase_code),
+                                         int(shared.frame_index.value), int(shared.frame_time_ns.value),
+                                         int(shared.stimulus_active.value), int(shared.stimulus_on_mask.value),
+                                         *fields])
+                        sample_index += 1
 
-                    one_sec_count += 1
-                    if now_ns - one_sec_start_ns >= 1_000_000_000:
-                        print(f"serial samples/sec: {one_sec_count}")
-                        one_sec_count = 0
-                        one_sec_start_ns = now_ns
-
-                    phase_code = int(shared.phase_code.value)
-                    frame_index = int(shared.frame_index.value)
-                    frame_time_ns = int(shared.frame_time_ns.value)
-                    visual_start_ns = int(shared.visual_start_ns.value)
-                    experiment_time_s = (
-                        (now_ns - visual_start_ns) / 1_000_000_000.0
-                        if visual_start_ns > 0
-                        else ""
-                    )
-                    stimulus_active = int(shared.stimulus_active.value)
-                    stimulus_on_mask = int(shared.stimulus_on_mask.value)
-
-                    parse_error = ""
-                    channel_count = ""
-                    values: List[Optional[float]] = [None, None, None]
-                    raw_text = raw_line.decode("utf-8", errors="replace").strip()
-
+                try:
+                    backend.prepare(shared.stop_event)
+                    if shared.stop_event.is_set():
+                        return
+                    update_device_metadata(files, backend)
+                    shared.serial_ready_event.set()
+                    deadline = time.perf_counter() + 120.0
+                    while not shared.start_event.wait(timeout=0.05):
+                        if shared.stop_event.is_set():
+                            return
+                        if time.perf_counter() > deadline:
+                            raise TimeoutError("serial worker timed out waiting for visual start")
+                    backend.start()
+                    started_ns = time.perf_counter_ns()
+                    one_sec_start = started_ns
+                    one_sec_count = 0
+                    while not shared.stop_event.is_set():
+                        samples = backend.read()
+                        save(samples)
+                        one_sec_count += len(samples)
+                        now = time.perf_counter_ns()
+                        if now - one_sec_start >= 1_000_000_000:
+                            print(f"serial samples/sec: {one_sec_count}")
+                            one_sec_start, one_sec_count = now, 0
+                except BaseException as exc:
+                    failure = str(exc)
+                    shared.stop_event.set()
+                    raise
+                finally:
+                    ended_ns = time.perf_counter_ns()
                     try:
-                        values, channel_count, raw_text = parse_serial_line(
-                            raw_line, config.channel_mode
-                        )
+                        save(backend.stop())
                     except Exception as exc:
-                        parse_error = str(exc)
-
-                    writer.writerow(
-                        [
-                            sample_index,
-                            now_ns,
-                            experiment_time_s,
-                            phase_code,
-                            phase_name(phase_code),
-                            frame_index,
-                            frame_time_ns,
-                            stimulus_active,
-                            stimulus_on_mask,
-                            channel_count,
-                            "" if values[0] is None else values[0],
-                            "" if values[1] is None else values[1],
-                            "" if values[2] is None else values[2],
-                            parse_error,
-                            raw_text,
-                        ]
-                    )
-                    sample_index += 1
-    except Exception as exc:
+                        failure = failure or f"STOP failed: {exc}"
+                        error_queue.put(f"STOP failed: {exc}")
+                    stats = backend.statistics()
+                    elapsed = (ended_ns - started_ns) / 1e9 if started_ns else 0
+                    stats.update(saved_samples=sample_index, duration_s=elapsed,
+                                 frames_per_second=sample_index / elapsed if elapsed else None,
+                                 error=failure)
+                    update_device_metadata(files, backend, stats)
+                    if stats.get("received_frames") is not None:
+                        print(f"EEG26 received frames = {stats['received_frames']}, "
+                              f"CRC errors = {stats['crc_errors']}, Sequence gaps = {stats['sequence_gaps']}, "
+                              f"firmware dropped = {stats['firmware_dropped']}, "
+                              f"timestamp gap events = {stats['timestamp_gap_events']}")
+    except BaseException as exc:
         error_queue.put(f"serial worker failed: {exc}")
+        shared.stop_event.set()
         shared.serial_ready_event.set()
 
 
@@ -657,6 +597,8 @@ def run_visual_experiment(config: ExperimentConfig, shared: SharedState, files: 
                 event_index += 1
 
                 for phase_frame_index in range(phase_total_frames):
+                    if shared.stop_event.is_set():
+                        raise RuntimeError("Serial acquisition stopped; inspect metadata/acquisition error")
                     if glfw.window_should_close(window):
                         raise KeyboardInterrupt("GLFW window closed.")
                     if glfw.get_key(window, glfw.KEY_ESCAPE) == glfw.PRESS:
@@ -872,7 +814,8 @@ def write_metadata(config: ExperimentConfig, files: RunFiles) -> None:
         "config": asdict(config),
         "files": asdict(files),
         "phase_codes": {str(int(phase)): name for phase, name in PHASE_NAMES.items()},
-        "serial_formats": [
+        "device": {"type": config.device_type, "sample_rate_hz": None},
+        "serial_formats": ["EEG26 binary v2, 68 bytes, 16 signed ADC counts"] if config.device_type == "eeg26" else [
             "ch1",
             "ch1,ch2,ch3",
         ],
@@ -914,27 +857,26 @@ def run(config: ExperimentConfig, files: RunFiles) -> None:
     )
     serial_process.start()
 
-    if not shared.serial_ready_event.wait(timeout=config.ready_timeout_sec):
-        shared.stop_event.set()
-        serial_process.join(timeout=2.0)
-        raise RuntimeError(
-            f"Serial worker did not become ready within {config.ready_timeout_sec} seconds."
-        )
-
-    queued_error = get_queued_error(error_queue)
-    if queued_error is not None:
-        shared.stop_event.set()
-        serial_process.join(timeout=2.0)
-        raise RuntimeError(queued_error)
-
     try:
+        if not shared.serial_ready_event.wait(timeout=config.ready_timeout_sec):
+            raise RuntimeError(f"Serial worker did not become ready within {config.ready_timeout_sec} seconds.")
+        if shared.stop_event.is_set():
+            serial_process.join(timeout=1.0)
+            raise RuntimeError(get_queued_error(error_queue) or "Serial initialization failed")
         run_visual_experiment(config, shared, files)
     finally:
         shared.stop_event.set()
-        serial_process.join(timeout=5.0)
+        serial_process.join(timeout=10.0)
         if serial_process.is_alive():
             serial_process.terminate()
             serial_process.join(timeout=2.0)
+            # A killed process cannot run finally. Reopen only after it has exited.
+            if config.device_type == "eeg26":
+                import serial
+                with serial.Serial(config.com_port, config.baudrate, timeout=0.05, write_timeout=1) as ser:
+                    recovery = BACKENDS[config.device_type](ser, config)
+                    recovery.stop()
+            raise RuntimeError("Serial worker required forced termination; acquisition incomplete")
 
     queued_error = get_queued_error(error_queue)
     if queued_error is not None:
@@ -977,7 +919,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=DEFAULT_COM_PORT,
         help="Serial port name or listed number, e.g. COM8 or 1.",
     )
-    parser.add_argument("--baudrate", type=int, default=DEFAULT_BAUDRATE)
+    parser.add_argument("--device", choices=tuple(BACKENDS), default=None)
+    parser.add_argument("--sample-rate", type=int, choices=tuple(RATE_CODES), default=None,
+                        help=f"EEG26 ADS1299 rate, written at startup; PC default: {DEFAULT_EEG26_SAMPLE_RATE_HZ} SPS.")
+    parser.add_argument("--baudrate", "--baud", type=int, default=DEFAULT_BAUDRATE)
     parser.add_argument(
         "--channel-mode",
         choices=("auto", "one", "three"),
@@ -1043,7 +988,8 @@ def config_from_args(args: argparse.Namespace) -> Tuple[ExperimentConfig, RunFil
         base_output_dir = Path(args.output_dir)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = base_output_dir / f"{DEFAULT_RUN_DIR_PREFIX}_{timestamp}"
+    prefix = "eeg26_parallel" if args.device == "eeg26" else DEFAULT_RUN_DIR_PREFIX
+    run_dir = base_output_dir / f"{prefix}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     files = make_run_files(run_dir)
 
@@ -1087,7 +1033,10 @@ def config_from_args(args: argparse.Namespace) -> Tuple[ExperimentConfig, RunFil
         serial_timeout_sec=args.serial_timeout_sec,
         serial_warmup_sec=args.serial_warmup_sec,
         ready_timeout_sec=args.ready_timeout_sec,
-        make_max2_summary=not args.skip_max2_summary,
+        make_max2_summary=not args.skip_max2_summary and args.device == "legacy",
+        device_type=args.device,
+        sample_rate_hz=(args.sample_rate if args.sample_rate is not None else
+                        DEFAULT_EEG26_SAMPLE_RATE_HZ if args.device == "eeg26" else None),
         stimuli=stimuli,
     )
     return config, files
@@ -1099,6 +1048,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         list_serial_ports()
         return 0
 
+    args.device = resolve_device(args.device)
+    if args.device == "legacy" and args.sample_rate is not None:
+        raise ValueError("--sample-rate is only supported for eeg26")
+    if args.device == "eeg26" and (not 0 < args.serial_timeout_sec <= 0.1):
+        raise ValueError("--serial-timeout-sec must be > 0 and <= 0.1 for bounded shutdown")
     args.com = resolve_com_port(args.com)
     config, files = config_from_args(args)
     write_metadata(config, files)
